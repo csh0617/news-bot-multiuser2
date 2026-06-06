@@ -2,16 +2,52 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>사용자 등록</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>정치인 뉴스 분류 현황</title>
+    <style>
+        body { font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; margin: 24px; color: #222; }
+        h2 { margin-bottom: 4px; }
+        .cards { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+        .card { padding: 14px 18px; border-radius: 10px; background: #f4f5f7; min-width: 110px; }
+        .card .n { font-size: 26px; font-weight: 700; }
+        .pos { color: #1a7f37; } .neg { color: #cf222e; } .neu { color: #6e7781; }
+        table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+        th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 14px; }
+        .tag { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+        .t-positive { background:#dafbe1; color:#1a7f37; }
+        .t-negative { background:#ffebe9; color:#cf222e; }
+        .t-neutral { background:#eaeef2; color:#6e7781; }
+        .err { color:#cf222e; }
+    </style>
 </head>
 <body>
-    <h2>사용자 등록</h2>
-    <form method="post" action="/register">
-        이름: <input type="text" name="name"><br>
-        Chat ID: <input type="text" name="chat_id"><br>
-        Telegram Token: <input type="text" name="telegram_token"><br>
-        키워드 (쉼표로 구분): <input type="text" name="keywords"><br>
-        <button type="submit">등록</button>
-    </form>
+    <h2>📰 정치인 뉴스 분류 현황</h2>
+    <p style="color:#6e7781;">동명이인 필터 · 관련성(주체/언급) · 감성(긍정/중립/부정) 자동 분류</p>
+
+    {% if error %}<p class="err">⚠️ {{ error }}</p>{% endif %}
+
+    <div class="cards">
+        <div class="card"><div>전체 저장</div><div class="n">{{ total }}</div></div>
+        <div class="card"><div>긍정</div><div class="n pos">{{ by.get('positive', 0) }}</div></div>
+        <div class="card"><div>중립</div><div class="n neu">{{ by.get('neutral', 0) }}</div></div>
+        <div class="card"><div>부정</div><div class="n neg">{{ by.get('negative', 0) }}</div></div>
+    </div>
+
+    {% if last_log %}
+    <p>최근 크롤링: 수집 {{ last_log.articles_found }} / 저장 {{ last_log.articles_saved }}
+       ({{ last_log.crawled_at }})</p>
+    {% endif %}
+
+    <h3>최근 주체 기사</h3>
+    <table>
+        <tr><th>정치인</th><th>제목</th><th>감성</th></tr>
+        {% for a in recent %}
+        <tr>
+            <td>{{ a.politician_name }}</td>
+            <td><a href="{{ a.source_url }}" target="_blank">{{ a.title }}</a></td>
+            <td><span class="tag t-{{ a.sentiment }}">{{ a.sentiment }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
 </body>
 </html>

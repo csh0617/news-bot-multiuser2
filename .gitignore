@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+*.log
+worker.log
+# 더 이상 사용하지 않는 로컬 상태 파일 (Supabase 로 이전)
+users.json
+history.json
