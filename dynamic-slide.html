@@ -6,12 +6,12 @@
 <title>Dynamic Code · Generative Art Slide</title>
 <style>
   :root{
-    --bg:#05060d;
-    --ink:#eef1ff;
-    --muted:#8b93c7;
-    --accent:#7b5cff;
-    --accent2:#22d3ee;
-    --accent3:#ff4d94;
+    --bg:#03000a;
+    --ink:#f3faff;
+    --muted:#7de3ff;
+    --accent:#b026ff;   /* 네온 퍼플 */
+    --accent2:#0ff0fc;  /* 네온 시안 */
+    --accent3:#ff2e97;  /* 네온 핑크 */
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:"Pretendard","Segoe UI",system-ui,-apple-system,sans-serif}
@@ -24,7 +24,7 @@
     position:relative;
     width:100vw;height:56.25vw;      /* 16:9 */
     max-height:100vh;max-width:177.78vh;
-    background:radial-gradient(120% 120% at 50% 0%, #0d1130 0%, var(--bg) 55%, #02030a 100%);
+    background:radial-gradient(120% 120% at 50% 0%, #1a0a3a 0%, var(--bg) 55%, #010004 100%);
     overflow:hidden;
     box-shadow:0 40px 120px rgba(0,0,0,.6);
   }
@@ -155,7 +155,7 @@
   window.addEventListener('resize',resize);resize();
 
   // ---- 색상 보간 유틸 (lerp) ----
-  const palette=[[123,92,255],[255,77,148],[34,211,238]];
+  const palette=[[176,38,255],[255,46,151],[15,240,252],[57,255,20]]; // 네온: 퍼플·핑크·시안·라임
   function lerp(a,b,t){return a+(b-a)*t;}
   function pick(t){ // t:0..1 → 팔레트 순환 색
     t=(t%1+1)%1;
@@ -200,7 +200,7 @@
 
     // 잔상: 완전 클리어 대신 반투명 덮기 → 트레일 효과
     ctx.globalCompositeOperation='source-over';
-    ctx.fillStyle='rgba(5,6,13,0.16)';
+    ctx.fillStyle='rgba(3,0,10,0.13)';
     ctx.fillRect(0,0,W,H);
 
     // 중심 (마우스 따라 부드럽게 이동)
