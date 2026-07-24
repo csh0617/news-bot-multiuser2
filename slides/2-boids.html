@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>02 · Boids Flocking</title>
+<style>
+  :root{--ink:#f3faff;--muted:#8fd8ff;--p:#b026ff;--c:#0ff0fc;--k:#ff2e97;--l:#39ff14}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;color:var(--ink);
+    font-family:"Pretendard","Segoe UI",system-ui,sans-serif}
+  .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:#02030a;box-shadow:0 40px 120px rgba(0,0,0,.6)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 120% at 50% 45%,transparent 55%,rgba(0,0,0,.66) 100%)}
+  .info{position:absolute;left:clamp(20px,4vw,64px);top:clamp(18px,4vw,56px);pointer-events:none;max-width:62%}
+  .idx{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:clamp(10px,1.1vw,15px);
+    letter-spacing:.3em;color:var(--c)}
+  .idx b{color:var(--ink)}
+  h1{margin-top:.25em;font-size:clamp(30px,5.4vw,92px);font-weight:800;letter-spacing:-.02em;line-height:1;
+    text-shadow:0 2px 30px rgba(176,38,255,.4)}
+  h1 .g{background:linear-gradient(100deg,var(--p),var(--k) 50%,var(--c));background-size:200% auto;
+    -webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 6s linear infinite}
+  .desc{margin-top:.7em;font-size:clamp(12px,1.55vw,22px);line-height:1.5;color:var(--muted);max-width:32ch}
+  .tags{margin-top:1.1em;display:flex;flex-wrap:wrap;gap:.5em}
+  .tags b{font-weight:600;font-size:clamp(9px,1vw,14px);color:#d7f4ff;padding:.45em .85em;border-radius:7px;
+    border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05)}
+  .tags b i{font-style:normal;color:var(--c)}
+  .hud{position:absolute;right:clamp(18px,3vw,48px);bottom:clamp(18px,3vw,48px);text-align:right;
+    pointer-events:none;font-family:"SF Mono",ui-monospace,monospace;font-size:clamp(9px,1vw,13px);color:var(--muted)}
+  .hud .fps{font-size:clamp(24px,3.4vw,52px);font-weight:700;color:var(--ink);
+    text-shadow:0 0 20px rgba(15,240,252,.45)}
+  .hud .fps small{font-size:.32em;letter-spacing:.2em;color:var(--muted);margin-left:.4em}
+  @keyframes shine{to{background-position:200% center}}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="stage" id="stage">
+  <canvas id="c"></canvas>
+  <div class="vignette"></div>
+  <div class="info">
+    <div class="idx"><b>02</b> / 06 &nbsp;·&nbsp; BOIDS FLOCKING</div>
+    <h1>무리 짓는 <span class="g">인공 생명</span></h1>
+    <div class="desc">분리·정렬·응집 세 규칙만으로 새 떼의 군집 비행이 창발합니다.</div>
+    <div class="tags"><b><i>flocking</i> 창발</b><b><i>vector</i> 물리</b><b>separation·align·cohesion</b></div>
+  </div>
+  <div class="hud"><div class="fps"><span id="fps">60</span><small>FPS</small></div></div>
+</div></div>
+<script>
+(function(){
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),stage=document.getElementById('stage'),fpsEl=document.getElementById('fps');
+let W,H,DPR,B=[];const N=170,NEON=['#b026ff','#0ff0fc','#ff2e97','#39ff14'];
+function resize(){DPR=Math.min(devicePixelRatio||1,2);const r=stage.getBoundingClientRect();W=r.width;H=r.height;
+  cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.fillStyle='#02030a';ctx.fillRect(0,0,W,H);seed();}
+function seed(){B=[];for(let i=0;i<N;i++)B.push({x:Math.random()*W,y:Math.random()*H,vx:Math.random()*2-1,vy:Math.random()*2-1,c:NEON[i%4]});}
+addEventListener('resize',resize);resize();
+let last=performance.now(),fA=0,fN=0,fr=0;
+function loop(now){const dt=Math.min((now-last)/1000,0.05);last=now;
+  ctx.fillStyle='rgba(2,3,10,0.14)';ctx.fillRect(0,0,W,H);
+  const R=64,R2=R*R;
+  for(const b of B){let ax=0,ay=0,cx=0,cy=0,sx=0,sy=0,n=0;
+    for(const o of B){if(o===b)continue;const dx=o.x-b.x,dy=o.y-b.y,d2=dx*dx+dy*dy;
+      if(d2<R2&&d2>0){n++;ax+=o.vx;ay+=o.vy;cx+=o.x;cy+=o.y;const d=Math.sqrt(d2);sx-=dx/d;sy-=dy/d;}}
+    if(n){ax/=n;ay/=n;cx=cx/n-b.x;cy=cy/n-b.y;
+      b.vx+=(ax-b.vx)*0.03+cx*0.0009+sx*0.05;b.vy+=(ay-b.vy)*0.03+cy*0.0009+sy*0.05;}
+    const sp=Math.hypot(b.vx,b.vy),mx=2.7;if(sp>mx){b.vx=b.vx/sp*mx;b.vy=b.vy/sp*mx;}
+    b.x+=b.vx;b.y+=b.vy;if(b.x<0)b.x+=W;if(b.x>W)b.x-=W;if(b.y<0)b.y+=H;if(b.y>H)b.y-=H;
+    const a=Math.atan2(b.vy,b.vx);ctx.fillStyle=b.c;ctx.globalAlpha=.95;
+    ctx.beginPath();ctx.moveTo(b.x+Math.cos(a)*7,b.y+Math.sin(a)*7);
+    ctx.lineTo(b.x+Math.cos(a+2.5)*5,b.y+Math.sin(a+2.5)*5);
+    ctx.lineTo(b.x+Math.cos(a-2.5)*5,b.y+Math.sin(a-2.5)*5);ctx.closePath();ctx.fill();}
+  ctx.globalAlpha=1;
+  fA+=1/Math.max(dt,1e-4);fN++;fr++;if(fr%15===0){fpsEl.textContent=Math.round(fA/fN);fA=0;fN=0;}
+  requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

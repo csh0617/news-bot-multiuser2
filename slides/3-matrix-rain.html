@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>03 · Matrix Rain</title>
+<style>
+  :root{--ink:#f3faff;--muted:#8fd8ff;--p:#b026ff;--c:#0ff0fc;--k:#ff2e97;--l:#39ff14}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;color:var(--ink);
+    font-family:"Pretendard","Segoe UI",system-ui,sans-serif}
+  .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:#02030a;box-shadow:0 40px 120px rgba(0,0,0,.6)}
+  canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 120% at 50% 45%,transparent 55%,rgba(0,0,0,.66) 100%)}
+  .info{position:absolute;left:clamp(20px,4vw,64px);top:clamp(18px,4vw,56px);pointer-events:none;max-width:62%}
+  .idx{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:clamp(10px,1.1vw,15px);
+    letter-spacing:.3em;color:var(--c)}
+  .idx b{color:var(--ink)}
+  h1{margin-top:.25em;font-size:clamp(30px,5.4vw,92px);font-weight:800;letter-spacing:-.02em;line-height:1;
+    text-shadow:0 2px 30px rgba(176,38,255,.4)}
+  h1 .g{background:linear-gradient(100deg,var(--p),var(--k) 50%,var(--c));background-size:200% auto;
+    -webkit-background-clip:text;background-clip:text;color:transparent;animation:shine 6s linear infinite}
+  .desc{margin-top:.7em;font-size:clamp(12px,1.55vw,22px);line-height:1.5;color:var(--muted);max-width:32ch}
+  .tags{margin-top:1.1em;display:flex;flex-wrap:wrap;gap:.5em}
+  .tags b{font-weight:600;font-size:clamp(9px,1vw,14px);color:#d7f4ff;padding:.45em .85em;border-radius:7px;
+    border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05)}
+  .tags b i{font-style:normal;color:var(--c)}
+  .hud{position:absolute;right:clamp(18px,3vw,48px);bottom:clamp(18px,3vw,48px);text-align:right;
+    pointer-events:none;font-family:"SF Mono",ui-monospace,monospace;font-size:clamp(9px,1vw,13px);color:var(--muted)}
+  .hud .fps{font-size:clamp(24px,3.4vw,52px);font-weight:700;color:var(--ink);
+    text-shadow:0 0 20px rgba(15,240,252,.45)}
+  .hud .fps small{font-size:.32em;letter-spacing:.2em;color:var(--muted);margin-left:.4em}
+  @keyframes shine{to{background-position:200% center}}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="stage" id="stage">
+  <canvas id="c"></canvas>
+  <div class="vignette"></div>
+  <div class="info">
+    <div class="idx"><b>03</b> / 06 &nbsp;·&nbsp; MATRIX RAIN</div>
+    <h1>쏟아지는 <span class="g">디지털 비</span></h1>
+    <div class="desc">열마다 문자가 낙하하고, 맨 앞 글자는 하얗게 빛납니다.</div>
+    <div class="tags"><b><i>column</i> 낙하</b><b>랜덤 글리프</b><b><i>head</i> glow</b></div>
+  </div>
+  <div class="hud"><div class="fps"><span id="fps">60</span><small>FPS</small></div></div>
+</div></div>
+<script>
+(function(){
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),stage=document.getElementById('stage'),fpsEl=document.getElementById('fps');
+let W,H,DPR,cols,drops,fs;
+const glyph='アイウエオカキクケコサシスセソタチツテトナ0123456789ABCDEF{}[]<>/*+=';
+function resize(){DPR=Math.min(devicePixelRatio||1,2);const r=stage.getBoundingClientRect();W=r.width;H=r.height;
+  cv.width=W*DPR;cv.height=H*DPR;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.fillStyle='#02030a';ctx.fillRect(0,0,W,H);
+  fs=Math.max(14,Math.round(W/70));cols=Math.floor(W/fs);drops=[];
+  for(let i=0;i<cols;i++)drops[i]=Math.random()*-40;ctx.textBaseline='top';}
+addEventListener('resize',resize);resize();
+let last=performance.now(),fA=0,fN=0,fr=0;
+function loop(now){const dt=Math.min((now-last)/1000,0.05);last=now;
+  ctx.fillStyle='rgba(2,3,10,0.09)';ctx.fillRect(0,0,W,H);ctx.font=fs+'px "SF Mono",monospace';
+  for(let i=0;i<cols;i++){const x=i*fs,y=drops[i]*fs,ch=glyph[(Math.random()*glyph.length)|0];
+    ctx.fillStyle='#0ff0fc';ctx.globalAlpha=.85;ctx.fillText(ch,x,y);
+    ctx.fillStyle='#eafffe';ctx.globalAlpha=1;ctx.fillText(ch,x,y-fs);
+    drops[i]+=0.55;if(y>H&&Math.random()>0.975)drops[i]=Math.random()*-30;}
+  ctx.globalAlpha=1;
+  fA+=1/Math.max(dt,1e-4);fN++;fr++;if(fr%15===0){fpsEl.textContent=Math.round(fA/fN);fA=0;fN=0;}
+  requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
