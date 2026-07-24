@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Dynamic Slide · Three.js Neon Blob</title>
+<style>
+  :root{
+    --ink:#f3faff;
+    --muted:#8fd8ff;
+    --accent:#b026ff;
+    --accent2:#0ff0fc;
+    --accent3:#ff2e97;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;
+    font-family:"Pretendard","Segoe UI",system-ui,-apple-system,sans-serif}
+
+  .stage-wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{
+    position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:#02030a;box-shadow:0 40px 120px rgba(0,0,0,.6);
+  }
+  #gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  .vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 120% at 50% 45%,transparent 52%,rgba(0,0,0,.72) 100%)}
+  .noise{position:absolute;inset:0;pointer-events:none;opacity:.04;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
+
+  .content{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;
+    justify-content:center;padding:0 clamp(24px,6vw,110px)}
+  .kicker{display:inline-flex;align-items:center;gap:.6em;width:max-content;
+    font-size:clamp(10px,1.15vw,18px);letter-spacing:.42em;text-transform:uppercase;
+    color:var(--accent2);font-weight:600;padding:.55em 1.1em;border:1px solid rgba(15,240,252,.35);
+    border-radius:999px;background:rgba(15,240,252,.06);backdrop-filter:blur(4px);
+    opacity:0;transform:translateY(18px);animation:rise .9s .2s forwards cubic-bezier(.2,.8,.2,1)}
+  .kicker .dot{width:.5em;height:.5em;border-radius:50%;background:var(--accent2);
+    box-shadow:0 0 12px var(--accent2);animation:pulse 1.6s infinite}
+  h1{margin-top:.5em;font-size:clamp(34px,7vw,116px);line-height:.98;font-weight:800;
+    letter-spacing:-.02em;color:var(--ink);text-shadow:0 2px 40px rgba(176,38,255,.4)}
+  h1 .line{display:block;overflow:hidden}
+  h1 .line span{display:inline-block;transform:translateY(110%);
+    animation:rise 1s forwards cubic-bezier(.16,1,.3,1)}
+  h1 .line:nth-child(1) span{animation-delay:.35s}
+  h1 .line:nth-child(2) span{animation-delay:.5s}
+  .grad{background:linear-gradient(100deg,var(--accent) 0%,var(--accent3) 45%,var(--accent2) 100%);
+    background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:shine 6s linear infinite,rise 1s .5s forwards cubic-bezier(.16,1,.3,1)}
+  p.sub{margin-top:1.1em;max-width:34ch;font-size:clamp(13px,1.6vw,24px);line-height:1.55;
+    color:var(--muted);opacity:0;transform:translateY(18px);
+    animation:rise 1s .85s forwards cubic-bezier(.2,.8,.2,1)}
+  .tags{margin-top:1.6em;display:flex;flex-wrap:wrap;gap:.6em;opacity:0;transform:translateY(18px);
+    animation:rise 1s 1.05s forwards cubic-bezier(.2,.8,.2,1)}
+  .tags b{font-weight:600;font-size:clamp(10px,1.1vw,15px);color:#d7f4ff;padding:.5em .95em;
+    border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04)}
+  .tags b i{font-style:normal;color:var(--accent2)}
+
+  .hud{position:absolute;right:clamp(20px,3vw,54px);bottom:clamp(18px,3vw,48px);text-align:right;
+    pointer-events:none;font-family:"SF Mono",ui-monospace,Menlo,monospace;opacity:0;
+    animation:fade 1s 1.3s forwards}
+  .hud .fps{font-size:clamp(28px,4vw,64px);font-weight:700;color:var(--ink);letter-spacing:-.02em;
+    text-shadow:0 0 24px rgba(15,240,252,.45)}
+  .hud .fps small{font-size:.34em;color:var(--muted);letter-spacing:.2em;margin-left:.4em}
+  .hud .code{margin-top:.3em;font-size:clamp(9px,1vw,13px);color:var(--muted)}
+  .hud .code b{color:var(--accent2);font-weight:600}
+
+  .loading{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);
+    font-size:clamp(12px,1.4vw,18px);letter-spacing:.2em;z-index:5;transition:opacity .6s}
+  .loading.hide{opacity:0;pointer-events:none}
+
+  @keyframes rise{to{opacity:1;transform:translateY(0)}}
+  @keyframes fade{to{opacity:1}}
+  @keyframes shine{to{background-position:200% center}}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.6);opacity:.5}}
+</style>
+</head>
+<body>
+<div class="stage-wrap">
+  <div class="stage" id="stage">
+    <canvas id="gl"></canvas>
+    <div class="noise"></div>
+    <div class="vignette"></div>
+    <div class="loading" id="loading">LOADING 3D ENGINE…</div>
+
+    <div class="content">
+      <span class="kicker"><span class="dot"></span>WebGL · Three.js · GLSL Shader</span>
+      <h1>
+        <span class="line"><span>차원을 접는</span></span>
+        <span class="line"><span class="grad">네온 코어</span></span>
+      </h1>
+      <p class="sub">실시간 노이즈 셰이더가 3D 메쉬를 매 프레임 변형시키고, 블룸이 빛을 번지게 합니다.</p>
+      <div class="tags">
+        <b><i>simplex</i> 노이즈 변형</b>
+        <b><i>fresnel</i> 림 라이트</b>
+        <b><i>UnrealBloom</i> 발광</b>
+        <b><i>10k</i> 파티클</b>
+      </div>
+    </div>
+
+    <div class="hud">
+      <div class="fps"><span id="fps">60</span><small>FPS</small></div>
+      <div class="code">tris <b id="tris">0</b> · draw <b id="draw">0</b></div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+const stage=document.getElementById('stage');
+const canvas=document.getElementById('gl');
+const loading=document.getElementById('loading');
+const fpsEl=document.getElementById('fps');
+const trisEl=document.getElementById('tris');
+const drawEl=document.getElementById('draw');
+
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x02030a,1);
+
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x02030a,0.055);
+
+const camera=new THREE.PerspectiveCamera(45,16/9,0.1,100);
+camera.position.set(0,0,6.2);
+
+// ---- 네온 블롭: 노이즈 변형 + 프레넬 셰이더 ----
+const NOISE=`
+// Ashima simplex noise 3D
+vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x,289.0);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g; vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+1.0*C.xxx; vec3 x2=x0-i2+2.0*C.xxx; vec3 x3=x0-1.0+3.0*C.xxx;
+  i=mod(i,289.0);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=1.0/7.0; vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy; vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0; vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y); vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x;p1*=norm.y;p2*=norm.z;p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0); m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+}`;
+
+const uniforms={
+  uTime:{value:0},
+  uAmp:{value:0.55},
+  cA:{value:new THREE.Color(0xb026ff)}, // 퍼플
+  cB:{value:new THREE.Color(0x0ff0fc)}, // 시안
+  cC:{value:new THREE.Color(0xff2e97)}, // 핑크
+};
+
+const blobMat=new THREE.ShaderMaterial({
+  uniforms,
+  vertexShader:`
+    ${NOISE}
+    uniform float uTime; uniform float uAmp;
+    varying float vN; varying vec3 vNormalW; varying vec3 vViewDir;
+    void main(){
+      float n=snoise(normal*1.4+uTime*0.35);
+      float n2=snoise(normal*3.0-uTime*0.2)*0.35;
+      float disp=(n+n2)*uAmp;
+      vN=disp;
+      vec3 pos=position+normal*disp;
+      vec4 wp=modelMatrix*vec4(pos,1.0);
+      vNormalW=normalize(mat3(modelMatrix)*normal);
+      vViewDir=normalize(cameraPosition-wp.xyz);
+      gl_Position=projectionMatrix*viewMatrix*wp;
+    }`,
+  fragmentShader:`
+    uniform vec3 cA; uniform vec3 cB; uniform vec3 cC; uniform float uTime;
+    varying float vN; varying vec3 vNormalW; varying vec3 vViewDir;
+    void main(){
+      float fres=pow(1.0-clamp(dot(vViewDir,vNormalW),0.0,1.0),2.2);
+      float t=clamp(vN*0.9+0.5,0.0,1.0);
+      vec3 base=mix(cA,cB,t);
+      base=mix(base,cC,smoothstep(0.55,1.0,fres));
+      vec3 col=base*(0.35+0.65*fres)+fres*0.6;
+      gl_FragColor=vec4(col,1.0);
+    }`,
+});
+
+const blobGeo=new THREE.IcosahedronGeometry(1.7,64);
+const blob=new THREE.Mesh(blobGeo,blobMat);
+scene.add(blob);
+
+// 와이어프레임 껍질
+const wireMat=new THREE.MeshBasicMaterial({color:0x0ff0fc,wireframe:true,transparent:true,opacity:0.06});
+const wire=new THREE.Mesh(new THREE.IcosahedronGeometry(2.05,6),wireMat);
+scene.add(wire);
+
+// ---- 파티클 성운 ----
+const COUNT=10000;
+const pGeo=new THREE.BufferGeometry();
+const pos=new Float32Array(COUNT*3);
+const pcol=new Float32Array(COUNT*3);
+const cols=[new THREE.Color(0xb026ff),new THREE.Color(0x0ff0fc),new THREE.Color(0xff2e97),new THREE.Color(0x39ff14)];
+for(let i=0;i<COUNT;i++){
+  const r=3.2+Math.pow(Math.random(),0.6)*9;
+  const th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+  pos[i*3]=r*Math.sin(ph)*Math.cos(th);
+  pos[i*3+1]=r*Math.cos(ph)*0.6;
+  pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+  const c=cols[(Math.random()*cols.length)|0];
+  pcol[i*3]=c.r;pcol[i*3+1]=c.g;pcol[i*3+2]=c.b;
+}
+pGeo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+pGeo.setAttribute('color',new THREE.BufferAttribute(pcol,3));
+const pMat=new THREE.PointsMaterial({size:0.045,vertexColors:true,transparent:true,opacity:0.9,
+  blending:THREE.AdditiveBlending,depthWrite:false});
+const points=new THREE.Points(pGeo,pMat);
+scene.add(points);
+
+// ---- 블룸 후처리 ----
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+const bloom=new UnrealBloomPass(new THREE.Vector2(1,1),1.25,0.55,0.15);
+composer.addPass(bloom);
+
+// ---- 리사이즈 ----
+function resize(){
+  const r=stage.getBoundingClientRect();
+  renderer.setSize(r.width,r.height,false);
+  composer.setSize(r.width,r.height);
+  camera.aspect=r.width/r.height;camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize);resize();
+
+// ---- 마우스 패럴럭스 ----
+const mouse={x:0,y:0,tx:0,ty:0};
+stage.addEventListener('pointermove',e=>{
+  const r=stage.getBoundingClientRect();
+  mouse.tx=((e.clientX-r.left)/r.width-0.5)*2;
+  mouse.ty=((e.clientY-r.top)/r.height-0.5)*2;
+});
+
+// ---- 루프 ----
+const clock=new THREE.Clock();
+let frame=0,fpsAcc=0,fpsN=0,last=performance.now();
+loading.classList.add('hide');
+
+function tick(){
+  const dt=clock.getDelta();
+  const t=clock.elapsedTime;
+  uniforms.uTime.value=t;
+  uniforms.uAmp.value=0.5+0.12*Math.sin(t*0.8);
+
+  blob.rotation.y+=dt*0.25; blob.rotation.x+=dt*0.08;
+  wire.rotation.y-=dt*0.12; wire.rotation.z+=dt*0.05;
+  points.rotation.y+=dt*0.03;
+
+  mouse.x+=(mouse.tx-mouse.x)*0.05; mouse.y+=(mouse.ty-mouse.y)*0.05;
+  camera.position.x=mouse.x*1.4;
+  camera.position.y=-mouse.y*0.9;
+  camera.lookAt(0,0,0);
+
+  composer.render();
+
+  frame++;
+  const now=performance.now(); const inst=1000/Math.max(now-last,1e-3); last=now;
+  fpsAcc+=inst;fpsN++;
+  if(frame%15===0){fpsEl.textContent=Math.round(fpsAcc/fpsN);fpsAcc=0;fpsN=0;
+    trisEl.textContent=renderer.info.render.triangles.toLocaleString();
+    drawEl.textContent=renderer.info.render.calls;}
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// WebGL 미지원/로드 실패 방어
+addEventListener('error',()=>{loading.textContent='3D 로드 실패 — 인터넷 연결을 확인하세요';loading.classList.remove('hide');});
+</script>
+</body>
+</html>
