@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Content Slide · Dynamic Effects</title>
+<style>
+  :root{
+    --bg:#080b16;--panel:#0e1324;--panel2:#121a30;--line:#1e2740;
+    --ink:#eaf1ff;--muted:#93a0c7;--dim:#5f6b8f;
+    --c:#39d0ff;   /* 데이터 기본 색조(단일 hue) */
+    --p:#b78bff;--k:#ff6ba6;--l:#5ef0b0;--y:#ffd166;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;color:var(--ink);
+    font-family:"Pretendard","Segoe UI",system-ui,sans-serif}
+  .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:
+      radial-gradient(80% 120% at 100% 0%,rgba(57,208,255,.10),transparent 55%),
+      radial-gradient(70% 100% at 0% 100%,rgba(183,139,255,.10),transparent 55%),
+      var(--bg);
+    display:flex;flex-direction:column;padding:clamp(20px,3.4vw,54px) clamp(24px,4vw,64px)}
+
+  /* 헤더 */
+  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:2em;margin-bottom:clamp(12px,1.8vw,24px)}
+  .eyebrow{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-size:clamp(9px,1vw,14px);
+    letter-spacing:.32em;color:var(--c);text-transform:uppercase}
+  h1{font-size:clamp(22px,3.4vw,54px);font-weight:800;letter-spacing:-.02em;line-height:1.02;margin-top:.28em;
+    min-height:1.1em}
+  h1 .cursor{display:inline-block;width:.06em;height:.9em;background:var(--c);margin-left:.06em;
+    vertical-align:-0.06em;animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+  .replay{flex:0 0 auto;display:inline-flex;align-items:center;gap:.5em;cursor:pointer;
+    font-size:clamp(11px,1.15vw,16px);font-weight:600;color:var(--ink);
+    padding:.6em 1.1em;border-radius:10px;border:1px solid var(--line);background:var(--panel2);transition:.2s}
+  .replay:hover{border-color:var(--c);color:var(--c);box-shadow:0 0 20px rgba(57,208,255,.2)}
+
+  /* 본문 그리드 */
+  .grid{flex:1;display:grid;grid-template-columns:1.05fr 1.5fr 1fr;gap:clamp(12px,1.5vw,22px);min-height:0}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--line);
+    border-radius:16px;padding:clamp(12px,1.5vw,22px);display:flex;flex-direction:column;min-height:0;position:relative;overflow:hidden}
+  .card h3{font-size:clamp(10px,1.05vw,15px);font-weight:600;color:var(--muted);letter-spacing:.02em;
+    margin-bottom:.9em;display:flex;align-items:center;gap:.5em}
+  .card h3 .tech{margin-left:auto;font-family:"SF Mono",monospace;font-size:.82em;color:var(--dim);font-weight:400}
+
+  /* 좌: 메시지 + 순차 불릿 */
+  .colL{display:flex;flex-direction:column;gap:clamp(12px,1.5vw,22px)}
+  .lead{font-size:clamp(13px,1.5vw,22px);line-height:1.5;color:var(--muted)}
+  .lead b{color:var(--ink);font-weight:700}
+  ul.reveal{list-style:none;display:flex;flex-direction:column;gap:.85em;margin-top:.2em}
+  ul.reveal li{display:flex;gap:.7em;align-items:flex-start;font-size:clamp(12px,1.28vw,18px);line-height:1.4;
+    opacity:0;transform:translateX(-16px);transition:opacity .5s,transform .5s}
+  ul.reveal li.in{opacity:1;transform:none}
+  ul.reveal li .ic{flex:0 0 auto;width:1.5em;height:1.5em;border-radius:7px;display:grid;place-items:center;
+    font-size:.8em;font-weight:800;color:#04121a;background:var(--c);margin-top:.05em}
+  ul.reveal li:nth-child(2) .ic{background:var(--l)}
+  ul.reveal li:nth-child(3) .ic{background:var(--p)}
+  ul.reveal li:nth-child(4) .ic{background:var(--y)}
+
+  /* KPI */
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:.7em}
+  .kpi{background:rgba(255,255,255,.02);border:1px solid var(--line);border-radius:12px;padding:.8em .7em}
+  .kpi .lab{font-size:clamp(9px,.92vw,12px);color:var(--muted)}
+  .kpi .num{font-size:clamp(20px,2.5vw,40px);font-weight:800;letter-spacing:-.02em;line-height:1.1;
+    font-variant-numeric:tabular-nums}
+  .kpi .num .u{font-size:.45em;color:var(--muted);font-weight:600;margin-left:.15em}
+  .kpi .delta{font-size:clamp(9px,.92vw,12px);font-weight:600;color:var(--l);display:flex;align-items:center;gap:.3em}
+  .kpi svg{width:100%;height:26px;margin-top:.3em;overflow:visible}
+
+  /* 중앙: 라인 차트 + 막대 */
+  .colM{display:flex;flex-direction:column;gap:clamp(12px,1.5vw,22px)}
+  .chart{flex:1;min-height:0}
+  .linewrap{flex:1;min-height:0;position:relative}
+  svg.line{width:100%;height:100%;overflow:visible}
+  .bars{display:flex;align-items:flex-end;gap:clamp(6px,.9vw,14px);height:100%;padding-top:.5em}
+  .bar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:.4em;height:100%}
+  .bar .col{width:100%;border-radius:6px 6px 3px 3px;height:0;transition:height 1s cubic-bezier(.2,.8,.2,1);
+    background:linear-gradient(180deg,var(--c),rgba(57,208,255,.25))}
+  .bar .col.alt{background:linear-gradient(180deg,var(--p),rgba(183,139,255,.25))}
+  .bar .v{font-size:clamp(9px,.95vw,13px);font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .bar .x{font-size:clamp(8px,.85vw,11px);color:var(--dim)}
+
+  /* 우: 도넛 + 스텝퍼 */
+  .colR{display:flex;flex-direction:column;gap:clamp(12px,1.5vw,22px)}
+  .donutwrap{display:flex;align-items:center;gap:1em}
+  .donut{position:relative;flex:0 0 auto}
+  .donut svg{transform:rotate(-90deg)}
+  .donut .pct{position:absolute;inset:0;display:grid;place-items:center;font-size:clamp(15px,1.9vw,30px);
+    font-weight:800;font-variant-numeric:tabular-nums}
+  .donut-legend{font-size:clamp(10px,1.05vw,15px);color:var(--muted);line-height:1.5}
+  .donut-legend b{color:var(--ink);font-size:1.15em}
+
+  .steps{display:flex;flex-direction:column;gap:0;margin-top:.2em}
+  .step{display:flex;gap:.75em;align-items:flex-start;position:relative;padding-bottom:1em}
+  .step:last-child{padding-bottom:0}
+  .step .node{flex:0 0 auto;width:1.7em;height:1.7em;border-radius:50%;border:2px solid var(--line);
+    background:var(--panel);display:grid;place-items:center;font-size:.8em;font-weight:800;color:var(--dim);
+    transition:.4s;z-index:1}
+  .step .node.on{border-color:var(--c);color:#04121a;background:var(--c);box-shadow:0 0 16px rgba(57,208,255,.5)}
+  .step:not(:last-child) .node::after{content:"";position:absolute;left:calc(0.85em - 1px);top:1.7em;
+    width:2px;height:calc(100% - 1.7em);background:var(--line)}
+  .step .node.on::after{background:var(--c)}
+  .step .txt{padding-top:.15em}
+  .step .txt .t{font-size:clamp(11px,1.15vw,16px);font-weight:600;transition:color .4s;color:var(--muted)}
+  .step .txt .t.on{color:var(--ink)}
+  .step .txt .s{font-size:clamp(9px,.92vw,12px);color:var(--dim)}
+
+  .foot{margin-top:clamp(8px,1.2vw,16px);font-family:"SF Mono",monospace;font-size:clamp(8px,.9vw,12px);
+    color:var(--dim);letter-spacing:.04em;text-align:center}
+  .foot b{color:var(--c)}
+</style>
+</head>
+<body data-palette="#39d0ff">
+<div class="wrap"><div class="stage" id="stage">
+
+  <div class="top">
+    <div>
+      <div class="eyebrow">2026 상반기 · 성과 리뷰</div>
+      <h1><span id="tw"></span><span class="cursor"></span></h1>
+    </div>
+    <button class="replay" id="replay">▶ 다시 재생</button>
+  </div>
+
+  <div class="grid">
+    <!-- 좌: 메시지 + 순차 불릿 -->
+    <div class="colL">
+      <div class="card" style="flex:0 0 auto">
+        <div class="lead">신규 사용자가 <b>전 분기 대비 2배</b> 늘며, 리텐션과 매출이 함께 개선됐습니다.</div>
+      </div>
+      <div class="card" style="flex:1">
+        <h3>핵심 요약 <span class="tech">stagger reveal</span></h3>
+        <ul class="reveal" id="bullets">
+          <li><span class="ic">1</span><span>가입 전환율 <b style="color:var(--l)">+38%</b> — 온보딩 개편 효과</span></li>
+          <li><span class="ic">2</span><span>30일 리텐션 <b style="color:var(--l)">61%</b>로 사상 최고</span></li>
+          <li><span class="ic">3</span><span>유료 전환 결제 <b style="color:var(--l)">+2.4배</b> 성장</span></li>
+          <li><span class="ic">4</span><span>CS 응답시간 <b style="color:var(--l)">4.2시간→52분</b> 단축</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 중앙: KPI + 라인 + 막대 -->
+    <div class="colM">
+      <div class="card" style="flex:0 0 auto">
+        <div class="kpis" id="kpis">
+          <div class="kpi">
+            <div class="lab">월 활성 사용자</div>
+            <div class="num" data-to="128400" data-fmt="k">0<span class="u">MAU</span></div>
+            <div class="delta">▲ 102%</div>
+            <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" data-points="4,20 20,18 36,19 52,13 68,10 84,5 100,2"></svg>
+          </div>
+          <div class="kpi">
+            <div class="lab">월 매출</div>
+            <div class="num" data-to="4.8" data-dec="1" data-prefix="₩" data-suffix="억">0</div>
+            <div class="delta">▲ 141%</div>
+            <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" data-points="4,22 20,20 36,16 52,15 68,11 84,7 100,3"></svg>
+          </div>
+          <div class="kpi">
+            <div class="lab">NPS 지수</div>
+            <div class="num" data-to="72">0</div>
+            <div class="delta">▲ 19p</div>
+            <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" data-points="4,18 20,17 36,14 52,14 68,9 84,8 100,4"></svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="card chart">
+        <h3>월별 활성 사용자 추이 <span class="tech">self-drawing line</span></h3>
+        <div class="linewrap">
+          <svg class="line" id="line" viewBox="0 0 400 150" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+
+      <div class="card chart">
+        <h3>채널별 신규 유입 <span class="tech">grow bars</span></h3>
+        <div class="bars" id="bars">
+          <div class="bar"><div class="col" data-h="46"></div><div class="v" data-to="1.2" data-dec="1" data-suffix="k">0</div><div class="x">오가닉</div></div>
+          <div class="bar"><div class="col" data-h="72"></div><div class="v" data-to="1.9" data-dec="1" data-suffix="k">0</div><div class="x">추천</div></div>
+          <div class="bar"><div class="col alt" data-h="100"></div><div class="v" data-to="2.6" data-dec="1" data-suffix="k">0</div><div class="x">광고</div></div>
+          <div class="bar"><div class="col" data-h="58"></div><div class="v" data-to="1.5" data-dec="1" data-suffix="k">0</div><div class="x">SNS</div></div>
+          <div class="bar"><div class="col" data-h="34"></div><div class="v" data-to="0.9" data-dec="1" data-suffix="k">0</div><div class="x">제휴</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 우: 도넛 + 스텝퍼 -->
+    <div class="colR">
+      <div class="card" style="flex:0 0 auto">
+        <h3>목표 달성률 <span class="tech">ring fill + count</span></h3>
+        <div class="donutwrap">
+          <div class="donut" id="donut">
+            <svg width="120" height="120" viewBox="0 0 120 120">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="var(--line)" stroke-width="12"/>
+              <circle id="ring" cx="60" cy="60" r="50" fill="none" stroke="var(--c)" stroke-width="12"
+                stroke-linecap="round" stroke-dasharray="314.16" stroke-dashoffset="314.16"/>
+            </svg>
+            <div class="pct" id="pct">0%</div>
+          </div>
+          <div class="donut-legend">연간 목표<br><b>128% 초과 달성</b></div>
+        </div>
+      </div>
+
+      <div class="card" style="flex:1">
+        <h3>로드맵 진행 <span class="tech">sequential steps</span></h3>
+        <div class="steps" id="steps">
+          <div class="step"><div class="node">✓</div><div class="txt"><div class="t">리서치 & 설계</div><div class="s">1분기 · 완료</div></div></div>
+          <div class="step"><div class="node">✓</div><div class="txt"><div class="t">MVP 출시</div><div class="s">2분기 · 완료</div></div></div>
+          <div class="step"><div class="node">✓</div><div class="txt"><div class="t">그로스 실험</div><div class="s">2분기 · 완료</div></div></div>
+          <div class="step"><div class="node">4</div><div class="txt"><div class="t">글로벌 확장</div><div class="s">3분기 · 진행 중</div></div></div>
+          <div class="step"><div class="node">5</div><div class="txt"><div class="t">수익화 고도화</div><div class="s">4분기 · 예정</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">이 슬라이드의 동적 효과 · <b>count-up</b> · <b>self-drawing line</b> · <b>grow bars</b> · <b>ring fill</b> · <b>sparkline</b> · <b>stagger reveal</b> · <b>typewriter</b> · <b>step sequence</b></div>
+
+</div></div>
+
+<script>
+(function(){
+const stage=document.getElementById('stage');
+const easeOut=t=>1-Math.pow(1-t,3);
+
+// 공통: 값 애니메이션
+function animate(dur,cb,done){
+  const t0=performance.now();
+  function step(now){
+    const p=Math.min((now-t0)/dur,1);
+    cb(easeOut(p),p);
+    if(p<1)requestAnimationFrame(step);else if(done)done();
+  }
+  requestAnimationFrame(step);
+}
+function fmt(v,{dec=0,fmt:f,prefix='',suffix='',u=''}){
+  let s;
+  if(f==='k'){s=Math.round(v).toLocaleString('en-US');}
+  else{s=v.toFixed(dec);}
+  return prefix+s+suffix;
+}
+
+// 1) 타이프라이터
+const twText='신규 사용자 2배, 매출 141% 성장';
+const tw=document.getElementById('tw');
+function typewriter(){
+  tw.textContent='';let i=0;
+  const iv=setInterval(()=>{tw.textContent=twText.slice(0,++i);if(i>=twText.length)clearInterval(iv);},45);
+}
+
+// 2) 카운트업 — KPI 숫자는 텍스트노드+단위 span 구조라 별도 처리
+function runKPINum(el){
+  const to=parseFloat(el.dataset.to);
+  const opt={dec:+(el.dataset.dec||0),fmt:el.dataset.fmt,prefix:el.dataset.prefix||'',suffix:el.dataset.suffix||''};
+  const unit=el.querySelector('.u');
+  animate(1500,v=>{
+    const txt=fmt(to*v,opt);
+    // 첫 텍스트 노드만 갱신
+    if(el.firstChild&&el.firstChild.nodeType===3)el.firstChild.nodeValue=txt;
+    else el.insertBefore(document.createTextNode(txt),el.firstChild);
+    if(unit)el.appendChild(unit);
+  });
+}
+function runBarVal(el){
+  const to=parseFloat(el.dataset.to);
+  const opt={dec:+(el.dataset.dec||0),suffix:el.dataset.suffix||''};
+  animate(1000,v=>{el.textContent=fmt(to*v,opt);});
+}
+
+// 3) 스파크라인 자가 드로잉
+function runSpark(svg){
+  const pts=svg.dataset.points;
+  const poly=document.createElementNS('http://www.w3.org/2000/svg','polyline');
+  poly.setAttribute('points',pts);
+  poly.setAttribute('fill','none');poly.setAttribute('stroke','var(--l)');
+  poly.setAttribute('stroke-width','2.4');poly.setAttribute('stroke-linecap','round');
+  poly.setAttribute('stroke-linejoin','round');
+  svg.innerHTML='';svg.appendChild(poly);
+  const len=poly.getTotalLength();
+  poly.style.strokeDasharray=len;poly.style.strokeDashoffset=len;
+  poly.getBoundingClientRect();
+  poly.style.transition='stroke-dashoffset 1.2s ease';poly.style.strokeDashoffset=0;
+}
+
+// 4) 라인 차트 자가 드로잉 + 영역 + 점
+const lineData=[18,30,26,44,40,62,58,84,92,110,128];
+function runLine(){
+  const svg=document.getElementById('line');
+  const W=400,H=150,pad=6;
+  const max=Math.max(...lineData)*1.1;
+  const xs=i=>pad+(W-2*pad)*i/(lineData.length-1);
+  const ys=v=>H-pad-(H-2*pad)*v/max;
+  let d='',area='';
+  lineData.forEach((v,i)=>{const x=xs(i),y=ys(v);d+=(i?'L':'M')+x+' '+y+' ';});
+  area=d+`L${xs(lineData.length-1)} ${H} L${xs(0)} ${H} Z`;
+  svg.innerHTML=`
+    <defs>
+      <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--c)" stop-opacity="0.35"/>
+        <stop offset="1" stop-color="var(--c)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path id="area" d="${area}" fill="url(#ag)" opacity="0"/>
+    <path id="pth" d="${d}" fill="none" stroke="var(--c)" stroke-width="2.5"
+      stroke-linecap="round" stroke-linejoin="round"/>`;
+  const pth=svg.querySelector('#pth'),ar=svg.querySelector('#area');
+  const L=pth.getTotalLength();
+  pth.style.strokeDasharray=L;pth.style.strokeDashoffset=L;pth.getBoundingClientRect();
+  pth.style.transition='stroke-dashoffset 1.6s ease';pth.style.strokeDashoffset=0;
+  ar.style.transition='opacity 1s ease .6s';ar.style.opacity=1;
+  // 마지막 점 강조
+  setTimeout(()=>{
+    const cx=xs(lineData.length-1),cy=ys(lineData[lineData.length-1]);
+    const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',cx);c.setAttribute('cy',cy);c.setAttribute('r',0);
+    c.setAttribute('fill','#fff');c.setAttribute('stroke','var(--c)');c.setAttribute('stroke-width','3');
+    svg.appendChild(c);
+    animate(400,v=>c.setAttribute('r',5*v));
+  },1500);
+}
+
+// 5) 막대 자라남
+function runBars(){
+  document.querySelectorAll('#bars .col').forEach((col,i)=>{
+    setTimeout(()=>{col.style.height=col.dataset.h+'%';},i*90);
+  });
+  document.querySelectorAll('#bars .v').forEach(v=>runBarVal(v));
+}
+
+// 6) 도넛 링 채우기 + %
+function runDonut(){
+  const ring=document.getElementById('ring'),pct=document.getElementById('pct');
+  const C=314.16,target=0.87; // 87% 링(=128% 달성을 시각적으로 표현)
+  ring.style.transition='stroke-dashoffset 1.6s cubic-bezier(.2,.8,.2,1)';
+  ring.style.strokeDashoffset=C*(1-target);
+  animate(1600,v=>{pct.textContent=Math.round(128*v)+'%';});
+}
+
+// 7) 순차 불릿
+function runBullets(){
+  document.querySelectorAll('#bullets li').forEach((li,i)=>{
+    setTimeout(()=>li.classList.add('in'),300+i*180);
+  });
+}
+
+// 8) 스텝퍼 순차 점등
+function runSteps(){
+  const nodes=document.querySelectorAll('#steps .step');
+  [0,1,2,3].forEach((idx,i)=>{
+    setTimeout(()=>{
+      const st=nodes[idx];
+      st.querySelector('.node').classList.add('on');
+      st.querySelector('.t').classList.add('on');
+    },400+i*260);
+  });
+}
+
+// 리셋
+function reset(){
+  tw.textContent='';
+  document.querySelectorAll('#bullets li').forEach(li=>li.classList.remove('in'));
+  document.querySelectorAll('#bars .col').forEach(c=>c.style.height='0');
+  document.querySelectorAll('#steps .node').forEach(n=>n.classList.remove('on'));
+  document.querySelectorAll('#steps .t').forEach(t=>t.classList.remove('on'));
+  const ring=document.getElementById('ring');ring.style.transition='none';ring.style.strokeDashoffset='314.16';
+  document.getElementById('pct').textContent='0%';
+  document.getElementById('line').innerHTML='';
+}
+
+function run(){
+  reset();
+  requestAnimationFrame(()=>{
+    typewriter();
+    document.querySelectorAll('.kpi .num').forEach(runKPINum);
+    document.querySelectorAll('.spark').forEach(s=>setTimeout(()=>runSpark(s),400));
+    setTimeout(runLine,300);
+    setTimeout(runBars,300);
+    setTimeout(runDonut,300);
+    runBullets();
+    runSteps();
+  });
+}
+
+document.getElementById('replay').addEventListener('click',run);
+
+// 화면에 들어오면 1회 자동 재생
+const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){run();io.disconnect();}});},{threshold:.35});
+io.observe(stage);
+// 관찰이 즉시 안 걸릴 경우 대비
+setTimeout(()=>{if(!tw.textContent)run();},600);
+})();
+</script>
+</body>
+</html>
