@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>360° Street Panorama · WebGL</title>
+<style>
+  :root{--ink:#f3faff;--muted:#9fb2d6;--c:#39d0ff;--k:#ff6ba6}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;color:var(--ink);
+    font-family:"Pretendard","Segoe UI",system-ui,sans-serif;user-select:none}
+  .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:#05070f;box-shadow:0 40px 120px rgba(0,0,0,.6);cursor:grab}
+  .stage.drag{cursor:grabbing}
+  canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+  .frameGrad{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(130% 130% at 50% 50%,transparent 60%,rgba(0,0,0,.5) 100%)}
+
+  .bar{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:1em;
+    padding:clamp(14px,2vw,26px) clamp(18px,2.6vw,40px);pointer-events:none;
+    background:linear-gradient(180deg,rgba(3,5,12,.75),transparent)}
+  .badge{font-family:"SF Mono",ui-monospace,monospace;font-size:clamp(8px,.95vw,12px);
+    letter-spacing:.22em;color:var(--c);border:1px solid rgba(57,208,255,.4);border-radius:999px;
+    padding:.45em .9em;background:rgba(57,208,255,.08)}
+  .place{display:flex;flex-direction:column}
+  .place .t{font-size:clamp(15px,2vw,30px);font-weight:800;letter-spacing:-.01em;line-height:1.1}
+  .place .s{font-size:clamp(9px,1vw,13px);color:var(--muted);margin-top:.15em}
+  .compass{margin-left:auto;display:flex;align-items:center;gap:.6em;font-family:"SF Mono",monospace;
+    font-size:clamp(10px,1.2vw,16px);color:var(--ink);pointer-events:none}
+  .compass .dir{width:2.4em;text-align:center;font-weight:800;color:var(--c)}
+  .compass .deg{color:var(--muted);font-size:.8em}
+
+  .reticle{position:absolute;left:50%;top:50%;width:clamp(18px,2vw,30px);height:clamp(18px,2vw,30px);
+    transform:translate(-50%,-50%);pointer-events:none;opacity:.5}
+  .reticle::before,.reticle::after{content:"";position:absolute;background:rgba(255,255,255,.8)}
+  .reticle::before{left:50%;top:0;width:1px;height:100%;transform:translateX(-50%)}
+  .reticle::after{top:50%;left:0;height:1px;width:100%;transform:translateY(-50%)}
+
+  .hint{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;
+    gap:clamp(10px,1.6vw,26px);padding:clamp(12px,1.8vw,24px);pointer-events:none;
+    background:linear-gradient(0deg,rgba(3,5,12,.7),transparent);
+    font-size:clamp(9px,1.05vw,14px);color:var(--muted)}
+  .hint b{color:var(--ink);font-weight:600}
+  .hint .fps{font-family:"SF Mono",monospace;color:var(--c)}
+
+  .loading{position:absolute;inset:0;display:grid;place-items:center;z-index:5;background:#05070f;
+    transition:opacity .8s;text-align:center}
+  .loading.hide{opacity:0;pointer-events:none}
+  .loading .ring{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.15);
+    border-top-color:var(--c);margin:0 auto 1em;animation:spin 1s linear infinite}
+  .loading .msg{font-size:clamp(11px,1.3vw,16px);color:var(--muted);letter-spacing:.1em}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="stage" id="stage">
+  <canvas id="gl"></canvas>
+  <div class="frameGrad"></div>
+
+  <div class="bar">
+    <span class="badge">360° · 합성 샘플</span>
+    <div class="place">
+      <div class="t">네온 시티 대로</div>
+      <div class="s">거리뷰 스타일 파노라마 · 절차적 생성 · 순수 WebGL</div>
+    </div>
+    <div class="compass"><span class="dir" id="dir">N</span><span class="deg" id="deg">0°</span></div>
+  </div>
+
+  <div class="reticle"></div>
+
+  <div class="hint">
+    <span>🖱️ <b>드래그</b> 둘러보기</span>
+    <span>🔍 <b>스크롤</b> 줌</span>
+    <span>⏸️ 가만히 두면 <b>자동 회전</b></span>
+    <span class="fps"><span id="fps">60</span> FPS</span>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="ring"></div>
+    <div class="msg">파노라마 생성 중…</div>
+  </div>
+</div></div>
+
+<script>
+(function(){
+const stage=document.getElementById('stage');
+const canvas=document.getElementById('gl');
+const loading=document.getElementById('loading');
+const fpsEl=document.getElementById('fps'),dirEl=document.getElementById('dir'),degEl=document.getElementById('deg');
+const clamp=(v,a,b)=>v<a?a:v>b?b:v, lerp=(a,b,t)=>a+(b-a)*t;
+
+/* ---------- 1) 등장방형 거리 파노라마 생성 ---------- */
+function hash(x,y){let n=Math.sin(x*127.1+y*311.7)*43758.5453;return n-Math.floor(n);}
+function vnoise(x,y){
+  const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+  const u=xf*xf*(3-2*xf),v=yf*yf*(3-2*yf);
+  const a=hash(xi,yi),b=hash(xi+1,yi),c=hash(xi,yi+1),d=hash(xi+1,yi+1);
+  return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v;
+}
+function buildPanorama(){
+  const W=2048,H=1024;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d');
+  const img=ctx.createImageData(W,H),D=img.data;
+  const zenith=[8,14,44],skyMid=[36,52,110],horizonSky=[255,150,92],fog=[150,140,150];
+  const eye=1.6,roadW=5.2,swW=2.4,farFog=90,sunTheta=Math.PI*0.62,sunPhi=0.12;
+  const phis=new Float32Array(H),sinP=new Float32Array(H),cosP=new Float32Array(H);
+  for(let py=0;py<H;py++){const v=py/(H-1),phi=(0.5-v)*Math.PI;phis[py]=phi;sinP[py]=Math.sin(phi);cosP[py]=Math.cos(phi);}
+  const thetas=new Float32Array(W),cosT=new Float32Array(W),sinT=new Float32Array(W);
+  for(let px=0;px<W;px++){const th=(px/(W-1))*Math.PI*2;thetas[px]=th;cosT[px]=Math.cos(th);sinT[px]=Math.sin(th);}
+
+  for(let py=0;py<H;py++){
+    const phi=phis[py],sp=sinP[py],cp=cosP[py];
+    for(let px=0;px<W;px++){
+      let r,g,b;const th=thetas[px];
+      if(sp<-0.002){ // 바닥(도로)
+        const t=eye/(-sp),gx=cp*cosT[px]*t,gz=cp*sinT[px]*t;
+        const dist=Math.sqrt(gx*gx+gz*gz),ax=Math.abs(gx);
+        const grain=vnoise(gx*3.5,gz*3.5)*18-9;
+        if(ax<roadW){
+          r=42+grain;g=45+grain;b=52+grain;
+          if(ax<0.28){const d=((gz%7)+7)%7;if(d<4.2){r=235;g=190;b=70;}}
+          else if(Math.abs(ax-(roadW-0.4))<0.12){r=225;g=228;b=235;}
+          else if(Math.abs(ax-roadW*0.5)<0.09){const d=((gz%5)+5)%5;if(d<2.4){r=200;g=205;b=215;}}
+        } else if(ax<roadW+0.35){r=90;g=95;b=108;}
+        else if(ax<roadW+swW){const tile=(Math.floor(ax*2)+Math.floor(gz*2))&1;const base=tile?70:60;r=base+grain*0.5;g=base+4+grain*0.5;b=base+12+grain*0.5;}
+        else{const n=vnoise(gx*1.5+50,gz*1.5+50);r=30+n*20;g=44+n*30;b=30+n*18;}
+        const ff=clamp(dist/farFog,0,1);
+        r=lerp(r,fog[0],ff);g=lerp(g,fog[1],ff);b=lerp(b,fog[2],ff);
+      } else { // 하늘
+        const tSky=clamp(phi/(Math.PI/2),0,1);let sky;
+        if(tSky<0.5){const k=tSky/0.5;sky=[lerp(horizonSky[0],skyMid[0],k),lerp(horizonSky[1],skyMid[1],k),lerp(horizonSky[2],skyMid[2],k)];}
+        else{const k=(tSky-0.5)/0.5;sky=[lerp(skyMid[0],zenith[0],k),lerp(skyMid[1],zenith[1],k),lerp(skyMid[2],zenith[2],k)];}
+        r=sky[0];g=sky[1];b=sky[2];
+        let dth=Math.abs(th-sunTheta);if(dth>Math.PI)dth=2*Math.PI-dth;
+        const dsun=Math.sqrt(dth*dth+(phi-sunPhi)*(phi-sunPhi));
+        const glow=Math.exp(-dsun*dsun/0.06);r+=glow*220;g+=glow*160;b+=glow*90;
+        const core=Math.exp(-dsun*dsun/0.002);r+=core*80;g+=core*70;b+=core*50;
+        const cl=vnoise(th*3.2+10,phi*3.2+5)*0.6+vnoise(th*7+3,phi*7)*0.4;
+        const cm=clamp((cl-0.55)*3,0,1)*clamp(1-tSky*0.4,0,1);
+        r=lerp(r,235,cm*0.5);g=lerp(g,210,cm*0.5);b=lerp(b,205,cm*0.5);
+      }
+      const i=(py*W+px)*4;D[i]=clamp(r,0,255);D[i+1]=clamp(g,0,255);D[i+2]=clamp(b,0,255);D[i+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+
+  // 빌딩(불 켜진 창문)
+  const horizonY=H*0.5,angDist=(a,b)=>{let d=Math.abs(a-b);return d>Math.PI?2*Math.PI-d:d;};
+  const bColors=[[18,22,38],[24,20,40],[16,26,40],[28,24,44]];
+  for(let i=0;i<70;i++){
+    const th=hash(i*3.1,7.7)*Math.PI*2;
+    const open=Math.min(angDist(th,Math.PI/2),angDist(th,Math.PI*1.5));
+    if(open<0.30 && hash(i,9)>0.25) continue;
+    const side=clamp(open/0.9,0,1),wAng=lerp(0.05,0.16,hash(i,2));
+    const x0=(th/(Math.PI*2))*W,wpx=(wAng/(Math.PI*2))*W;
+    const h=(0.10+0.34*side)*H*lerp(0.7,1.25,hash(i,4));
+    const col=bColors[i%bColors.length],haze=clamp(1-side*0.7,0,0.7);
+    const draw=(sx)=>{
+      ctx.fillStyle=`rgb(${col[0]},${col[1]},${col[2]})`;ctx.globalAlpha=1;ctx.fillRect(sx,horizonY-h,wpx,h);
+      ctx.fillStyle=`rgba(${fog[0]},${fog[1]},${fog[2]},${haze})`;ctx.fillRect(sx,horizonY-h,wpx,h);
+      const cols=Math.max(2,Math.floor(wpx/13)),rows=Math.max(3,Math.floor(h/16)),gw=wpx/cols,gh=h/rows;
+      for(let cx=0;cx<cols;cx++)for(let ry=0;ry<rows;ry++){
+        const lit=hash(i*13+cx,ry*7);
+        if(lit>0.45){const warm=lit>0.72;
+          ctx.fillStyle=warm?`rgba(255,210,120,${0.7-haze*0.6})`:`rgba(140,225,255,${0.6-haze*0.5})`;
+          ctx.fillRect(sx+cx*gw+gw*0.22,horizonY-h+ry*gh+gh*0.2,gw*0.5,gh*0.5);}
+      }
+    };
+    draw(x0);if(x0+wpx>W)draw(x0-W);if(x0<0)draw(x0+W);
+  }
+  ctx.globalAlpha=1;
+  return cv;
+}
+
+/* ---------- 2) 순수 WebGL 파노라마 렌더러 (풀스크린 레이캐스트) ---------- */
+const gl=canvas.getContext('webgl',{antialias:true})||canvas.getContext('experimental-webgl');
+if(!gl){loading.querySelector('.msg').textContent='WebGL을 사용할 수 없습니다';return;}
+
+const vsSrc=`attribute vec2 p;varying vec2 uv;void main(){uv=p;gl_Position=vec4(p,0.0,1.0);}`;
+const fsSrc=`precision highp float;varying vec2 uv;
+uniform sampler2D tex;uniform vec3 fwd;uniform vec3 rgt;uniform vec3 up;uniform float tanH;uniform float aspect;
+#define PI 3.14159265
+void main(){
+  vec3 dir=normalize(fwd + uv.x*tanH*aspect*rgt + uv.y*tanH*up);
+  float u=atan(dir.z,dir.x)/(2.0*PI)+0.5;
+  float v=asin(clamp(dir.y,-1.0,1.0))/PI+0.5;
+  gl_FragColor=texture2D(tex,vec2(u,v));
+}`;
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(s);return s;}
+const prog=gl.createProgram();
+gl.attachShader(prog,sh(gl.VERTEX_SHADER,vsSrc));gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,fsSrc));
+gl.linkProgram(prog);gl.useProgram(prog);
+
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1, 3,-1, -1,3]),gl.STATIC_DRAW);
+const loc=gl.getAttribLocation(prog,'p');gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+
+const uFwd=gl.getUniformLocation(prog,'fwd'),uRgt=gl.getUniformLocation(prog,'rgt'),uUp=gl.getUniformLocation(prog,'up');
+const uTanH=gl.getUniformLocation(prog,'tanH'),uAspect=gl.getUniformLocation(prog,'aspect');
+
+// 텍스처 업로드
+const tex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,tex);
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,buildPanorama());
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+
+let VW=1,VH=1;
+function resize(){const r=stage.getBoundingClientRect();const dpr=Math.min(devicePixelRatio||1,2);
+  VW=Math.round(r.width*dpr);VH=Math.round(r.height*dpr);canvas.width=VW;canvas.height=VH;gl.viewport(0,0,VW,VH);}
+addEventListener('resize',resize);resize();
+
+// 시점
+let lon=90,lat=2,fov=70,dragging=false,mx=0,my=0,idle=0;
+stage.addEventListener('pointerdown',e=>{dragging=true;idle=0;mx=e.clientX;my=e.clientY;stage.classList.add('drag');stage.setPointerCapture(e.pointerId);});
+stage.addEventListener('pointermove',e=>{if(!dragging)return;lon-=(e.clientX-mx)*0.13;lat=clamp(lat+(e.clientY-my)*0.13,-85,85);mx=e.clientX;my=e.clientY;idle=0;});
+stage.addEventListener('pointerup',()=>{dragging=false;stage.classList.remove('drag');});
+stage.addEventListener('wheel',e=>{e.preventDefault();fov=clamp(fov+e.deltaY*0.03,32,90);idle=0;},{passive:false});
+
+const DIRS=['N','NE','E','SE','S','SW','W','NW'];
+loading.classList.add('hide');
+
+let last=performance.now(),fA=0,fN=0,fr=0;
+function frame(now){
+  const dt=Math.min((now-last)/1000,0.05);last=now;idle+=dt;
+  if(!dragging && idle>3) lon+=dt*3.2;
+  const yaw=lon*Math.PI/180,pitch=lat*Math.PI/180;
+  const cp=Math.cos(pitch),sp=Math.sin(pitch),cy=Math.cos(yaw),sy=Math.sin(yaw);
+  const fwd=[cp*cy,sp,cp*sy];
+  const wUp=[0,1,0];
+  let rgt=[fwd[1]*wUp[2]-fwd[2]*wUp[1], fwd[2]*wUp[0]-fwd[0]*wUp[2], fwd[0]*wUp[1]-fwd[1]*wUp[0]];
+  let rl=Math.hypot(rgt[0],rgt[1],rgt[2])||1;rgt=[rgt[0]/rl,rgt[1]/rl,rgt[2]/rl];
+  let up=[rgt[1]*fwd[2]-rgt[2]*fwd[1], rgt[2]*fwd[0]-rgt[0]*fwd[2], rgt[0]*fwd[1]-rgt[1]*fwd[0]];
+
+  gl.uniform3f(uFwd,fwd[0],fwd[1],fwd[2]);
+  gl.uniform3f(uRgt,rgt[0],rgt[1],rgt[2]);
+  gl.uniform3f(uUp,up[0],up[1],up[2]);
+  gl.uniform1f(uTanH,Math.tan(fov*Math.PI/180*0.5));
+  gl.uniform1f(uAspect,VW/VH);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  let hd=((lon-90)%360+360)%360;
+  dirEl.textContent=DIRS[Math.round(hd/45)%8];degEl.textContent=Math.round(hd)+'°';
+  fr++;fA+=1/Math.max(dt,1e-4);fN++;if(fr%15===0){fpsEl.textContent=Math.round(fA/fN);fA=0;fN=0;}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
