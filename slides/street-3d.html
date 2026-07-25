@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Street · WebGL City Drive</title>
+<style>
+  :root{--ink:#f3faff;--muted:#9fb2d6;--c:#39d0ff}
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden;color:var(--ink);
+    font-family:"Pretendard","Segoe UI",system-ui,sans-serif;user-select:none}
+  .wrap{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+  .stage{position:relative;width:100vw;height:56.25vw;max-height:100vh;max-width:177.78vh;
+    overflow:hidden;background:#05070f;box-shadow:0 40px 120px rgba(0,0,0,.6);cursor:grab}
+  .stage.drag{cursor:grabbing}
+  canvas#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .frameGrad{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(130% 130% at 50% 45%,transparent 62%,rgba(0,0,0,.5) 100%)}
+
+  .bar{position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:1em;
+    padding:clamp(14px,2vw,26px) clamp(18px,2.6vw,40px);pointer-events:none;
+    background:linear-gradient(180deg,rgba(3,5,12,.7),transparent)}
+  .badge{font-family:"SF Mono",ui-monospace,monospace;font-size:clamp(8px,.95vw,12px);
+    letter-spacing:.22em;color:var(--c);border:1px solid rgba(57,208,255,.4);border-radius:999px;
+    padding:.45em .9em;background:rgba(57,208,255,.08)}
+  .place .t{font-size:clamp(15px,2vw,30px);font-weight:800;letter-spacing:-.01em;line-height:1.1}
+  .place .s{font-size:clamp(9px,1vw,13px);color:var(--muted);margin-top:.15em}
+  .compass{margin-left:auto;display:flex;align-items:center;gap:.6em;font-family:"SF Mono",monospace;
+    font-size:clamp(10px,1.2vw,16px);pointer-events:none}
+  .compass .dir{width:2.4em;text-align:center;font-weight:800;color:var(--c)}
+  .compass .deg{color:var(--muted);font-size:.8em}
+
+  .hint{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;
+    gap:clamp(10px,1.6vw,26px);padding:clamp(12px,1.8vw,24px);pointer-events:none;
+    background:linear-gradient(0deg,rgba(3,5,12,.7),transparent);
+    font-size:clamp(9px,1.05vw,14px);color:var(--muted)}
+  .hint b{color:var(--ink);font-weight:600}
+  .hint .fps{font-family:"SF Mono",monospace;color:var(--c)}
+
+  .loading{position:absolute;inset:0;display:grid;place-items:center;z-index:5;background:#05070f;
+    transition:opacity .8s;text-align:center}
+  .loading.hide{opacity:0;pointer-events:none}
+  .loading .ring{width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.15);
+    border-top-color:var(--c);margin:0 auto 1em;animation:spin 1s linear infinite}
+  .loading .msg{font-size:clamp(11px,1.3vw,16px);color:var(--muted);letter-spacing:.1em}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="stage" id="stage">
+  <canvas id="gl"></canvas>
+  <div class="frameGrad"></div>
+  <div class="bar">
+    <span class="badge">3D · 실주행 · 합성 샘플</span>
+    <div class="place"><div class="t">네온 시티 대로</div>
+      <div class="s">실제 3D 건물 · 원근 파랄랙스 · 순수 WebGL</div></div>
+    <div class="compass"><span class="dir" id="dir">N</span><span class="deg" id="deg">0°</span></div>
+  </div>
+  <div class="hint">
+    <span>🖱️ <b>드래그</b> 시선</span>
+    <span>🔍 <b>스크롤</b> 줌</span>
+    <span>▶ 도로를 따라 <b>자동 주행</b></span>
+    <span class="fps"><span id="fps">60</span> FPS</span>
+  </div>
+  <div class="loading" id="loading"><div class="ring"></div><div class="msg">도시 생성 중…</div></div>
+</div></div>
+
+<script>
+(function(){
+const stage=document.getElementById('stage'),canvas=document.getElementById('gl'),loading=document.getElementById('loading');
+const fpsEl=document.getElementById('fps'),dirEl=document.getElementById('dir'),degEl=document.getElementById('deg');
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const gl=canvas.getContext('webgl',{antialias:true})||canvas.getContext('experimental-webgl');
+if(!gl){loading.querySelector('.msg').textContent='WebGL을 사용할 수 없습니다';return;}
+gl.getExtension('OES_standard_derivatives');
+
+/* ---------- 시드 RNG ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const rng=mulberry32(20260725);
+const rand=(a,b)=>a+(b-a)*rng();
+
+/* ============================================================
+   1) 3D 도시 지오메트리 생성 (인터리브 버퍼)
+   pos(3) normal(3) uv(2) seed(1) kind(1)  → 10 float/vertex
+   kind: 0=벽, 1=지붕, 2=도로/지면
+   ============================================================ */
+const L=130;                 // 거리 1주기 길이(m) — 카메라가 mod L로 순환
+const verts=[];
+function pushQuad(a,b,c,d,nx,ny,nz,cols,rows,seed,kind){
+  const uv=[[0,0],[cols,0],[cols,rows],[0,rows]];
+  const q=[a,b,c,a,c,d],qu=[0,1,2,0,2,3];
+  for(let i=0;i<6;i++){const p=q[i],u=uv[qu[i]];
+    verts.push(p[0],p[1],p[2],nx,ny,nz,u[0],u[1],seed,kind);}
+}
+function box(x0,x1,z0,z1,h,seed){
+  const cx=(x1-x0),cz=(z1-z0);
+  const colsX=Math.max(2,Math.round(cx/4.4)),colsZ=Math.max(2,Math.round(cz/4.4)),rows=Math.max(3,Math.round(h/4.0));
+  // 앞(+z), 뒤(-z), 우(+x), 좌(-x), 지붕
+  pushQuad([x0,0,z1],[x1,0,z1],[x1,h,z1],[x0,h,z1], 0,0,1, colsX,rows,seed,0);
+  pushQuad([x1,0,z0],[x0,0,z0],[x0,h,z0],[x1,h,z0], 0,0,-1,colsX,rows,seed,0);
+  pushQuad([x1,0,z1],[x1,0,z0],[x1,h,z0],[x1,h,z1], 1,0,0, colsZ,rows,seed,0);
+  pushQuad([x0,0,z0],[x0,0,z1],[x0,h,z1],[x0,h,z0], -1,0,0,colsZ,rows,seed,0);
+  pushQuad([x0,h,z1],[x1,h,z1],[x1,h,z0],[x0,h,z0], 0,1,0, 1,1,seed,1);
+}
+
+// 건물 스펙 생성(1주기), 이후 z와 z+L 두 번 배치 → 이음새 없는 순환
+const specs=[];
+const roadW=6.0, sw=3.2, line=roadW+sw; // 도로 반폭 + 인도
+for(const side of [-1,1]){
+  // 앞줄
+  let z=rand(0,8);
+  while(z<L-6){
+    const dz=rand(7,13), wx=rand(9,17), h=rand(11,40);
+    const near=line+rand(0.2,1.5);
+    const x0=side>0?near:-(near+wx), x1=side>0?near+wx:-near;
+    specs.push({x0,x1,z0:z,z1:z+dz,h,seed:rng()*1000});
+    z+=dz+rand(2,6);
+  }
+  // 뒷줄(더 높은 스카이라인)
+  let z2=rand(0,14);
+  while(z2<L-8){
+    const dz=rand(10,20), wx=rand(12,24), h=rand(26,72);
+    const near=line+rand(20,30);
+    const x0=side>0?near:-(near+wx), x1=side>0?near+wx:-near;
+    specs.push({x0,x1,z0:z2,z1:z2+dz,h,seed:rng()*1000});
+    z2+=dz+rand(4,10);
+  }
+}
+for(const off of [0,L]) for(const s of specs) box(s.x0,s.x1,s.z0+off,s.z1+off,s.h,s.seed);
+
+// 지면(도로) — 큰 사각형 한 장
+(function ground(){
+  const X=260,Z0=-40,Z1=2*L+40;
+  pushQuad([-X,0,Z0],[X,0,Z0],[X,0,Z1],[-X,0,Z1], 0,1,0, 1,1, 0, 2);
+})();
+
+const data=new Float32Array(verts);
+const vbuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vbuf);gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+const VCOUNT=data.length/10;
+
+/* ============================================================
+   2) 셰이더
+   ============================================================ */
+const cityVS=`attribute vec3 aPos;attribute vec3 aNor;attribute vec2 aUV;attribute float aSeed;attribute float aKind;
+uniform mat4 uVP;
+varying vec3 vN;varying vec2 vUV;varying float vSeed;varying float vKind;varying vec3 vW;
+void main(){vN=aNor;vUV=aUV;vSeed=aSeed;vKind=aKind;vW=aPos;
+  gl_Position=uVP*vec4(aPos,1.0);}`;
+const cityFS=`precision highp float;
+varying vec3 vN;varying vec2 vUV;varying float vSeed;varying float vKind;varying vec3 vW;
+uniform vec3 uFog;uniform vec3 uLight;uniform vec3 uCam;uniform float uTime;
+float h11(float n){return fract(sin(n)*43758.5453);}
+float h2(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+void main(){
+  vec3 col;
+  float d=distance(vW,uCam);
+  if(vKind>1.5){ // ---- 도로/지면 ----
+    float ax=abs(vW.x);float gz=vW.z;float grain=(h2(floor(vW.xz*3.0))-0.5)*0.06;
+    if(ax<6.0){col=vec3(0.17,0.18,0.21)+grain;
+      if(ax<0.28){float m=mod(gz,7.0);if(m<4.2)col=vec3(0.92,0.74,0.28);}
+      else if(abs(ax-5.6)<0.13)col=vec3(0.88,0.9,0.93);
+      else if(abs(ax-3.0)<0.09){float m=mod(gz,5.0);if(m<2.4)col=vec3(0.8,0.82,0.86);}
+    } else if(ax<6.4){col=vec3(0.34,0.36,0.42);}
+    else if(ax<9.2){float t=mod(floor(ax*2.0)+floor(gz*2.0),2.0);col=vec3(0.26,0.28,0.33)+t*0.05+grain;}
+    else{col=vec3(0.10,0.15,0.10)+grain;}
+  } else if(vKind>0.5){ // ---- 지붕 ----
+    col=vec3(0.09,0.10,0.14);
+    float diff=max(dot(normalize(vN),normalize(uLight)),0.0);col*=(0.5+0.6*diff);
+  } else { // ---- 벽 + 창문 (거리 기반 LOD 안티에일리어싱) ----
+    vec2 g=vUV;vec2 cell=floor(g);vec2 cc=fract(g)-0.5;
+    vec3 tint=mix(vec3(0.15,0.16,0.21),vec3(0.22,0.19,0.25),h11(vSeed*1.7));
+    float diff=max(dot(normalize(vN),normalize(uLight)),0.0);
+    vec3 wall=tint*(0.42+0.7*diff);
+    if(fract(g.y)<0.10)wall*=0.6; // 층 슬래브
+    float hw=0.5-0.22;                        // 창문 반폭(셀 단위)
+    vec3 viewDir=normalize(uCam-vW);
+    float graze=abs(dot(normalize(vN),viewDir));
+    float foot=d/max(graze,0.12);             // 그레이징(단축) 고려한 유효 거리
+    float pw=clamp(foot*0.006,0.02,0.9);      // footprint에 따라 에지 폭 확대 → 모아레 방지
+    float wx=smoothstep(hw+pw,hw-pw,abs(cc.x));
+    float wy=smoothstep(hw+pw,hw-pw,abs(cc.y));
+    float wmask=clamp(wx*wy,0.0,1.0);
+    // 점등 여부 — 일부 창문은 시간에 따라 깜빡임
+    float baseR=h2(cell+vSeed);
+    bool flick=h2(cell*1.7+vSeed+5.0)>0.82;
+    float lit=flick?step(0.5,fract(sin(dot(cell,vec2(7.3,3.1))+vSeed)+uTime*0.6))
+                   :step(0.52,baseR);
+    vec3 winCol;
+    if(lit>0.5){ float warm=h2(cell+vSeed+7.3);
+      winCol=(warm>0.5?vec3(1.0,0.80,0.42):vec3(0.5,0.86,1.0))*1.18;
+    } else { winCol=mix(vec3(0.05,0.07,0.13),vec3(0.22,0.17,0.24),0.5)*(0.55+0.5*diff); }
+    col=mix(wall,winCol,wmask);
+    // 애니메이션 네온 간판 (일부 건물)
+    if(h2(vec2(vSeed,7.0))>0.62){
+      float signRow=1.0+floor(h2(vec2(vSeed,9.0))*3.0);
+      if(abs(cell.y-signRow)<0.5){
+        vec3 neon=0.55+0.45*cos(uTime*2.5+cell.x*0.6+vec3(0.0,2.1,4.2));
+        float band=smoothstep(0.5,0.32,abs(cc.y));
+        col=mix(col,neon*1.3,band*0.85);
+      }
+    }
+    // 원거리 파사드를 평균색으로 페이드(잔여 지글거림 제거)
+    vec3 avg=wall*0.82+vec3(0.05,0.048,0.05);
+    float lod=clamp((foot-22.0)/55.0,0.0,1.0);
+    col=mix(col,avg,lod);
+  }
+  float fogF=clamp((d-30.0)/100.0,0.0,1.0);
+  col=mix(col,uFog,fogF);
+  gl_FragColor=vec4(col,1.0);
+}`;
+
+// 하늘(배경) — 카메라 레이 기준 그라데이션 + 해
+const skyVS=`attribute vec2 p;varying vec2 uv;void main(){uv=p;gl_Position=vec4(p,0.0,1.0);}`;
+const skyFS=`precision highp float;varying vec2 uv;
+uniform vec3 fwd;uniform vec3 rgt;uniform vec3 up;uniform float tanH;uniform float aspect;uniform vec3 sun;
+void main(){
+  vec3 d=normalize(fwd+uv.x*tanH*aspect*rgt+uv.y*tanH*up);
+  float t=clamp(d.y*1.3+0.15,0.0,1.0);
+  vec3 hor=vec3(1.0,0.59,0.36),mid=vec3(0.14,0.20,0.43),zen=vec3(0.03,0.05,0.17);
+  vec3 sky=t<0.5?mix(hor,mid,t/0.5):mix(mid,zen,(t-0.5)/0.5);
+  float s=max(dot(d,normalize(sun)),0.0);
+  sky+=vec3(1.0,0.72,0.4)*pow(s,80.0)*1.2;      // 해 코어
+  sky+=vec3(1.0,0.6,0.3)*pow(s,6.0)*0.35;        // 글로우
+  gl_FragColor=vec4(sky,1.0);
+}`;
+
+function sh(t,src){const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw gl.getShaderInfoLog(s);return s;}
+function prog(vs,fs){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,vs));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw gl.getProgramInfoLog(p);return p;}
+const city=prog(cityVS,cityFS), sky=prog(skyVS,skyFS);
+
+// city attrib/uniform
+const cA={pos:gl.getAttribLocation(city,'aPos'),nor:gl.getAttribLocation(city,'aNor'),uv:gl.getAttribLocation(city,'aUV'),seed:gl.getAttribLocation(city,'aSeed'),kind:gl.getAttribLocation(city,'aKind')};
+const cU={vp:gl.getUniformLocation(city,'uVP'),cam:gl.getUniformLocation(city,'uCam'),fog:gl.getUniformLocation(city,'uFog'),light:gl.getUniformLocation(city,'uLight'),time:gl.getUniformLocation(city,'uTime')};
+// sky
+const skyBuf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,skyBuf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+const sA=gl.getAttribLocation(sky,'p');
+const sU={fwd:gl.getUniformLocation(sky,'fwd'),rgt:gl.getUniformLocation(sky,'rgt'),up:gl.getUniformLocation(sky,'up'),tanH:gl.getUniformLocation(sky,'tanH'),aspect:gl.getUniformLocation(sky,'aspect'),sun:gl.getUniformLocation(sky,'sun')};
+
+/* ---- 차량 불빛(포인트 스프라이트, 가산 블렌딩) ---- */
+const carVS=`attribute vec3 aPos;attribute vec3 aCol;attribute float aSize;
+uniform mat4 uVP;varying vec3 vCol;
+void main(){vCol=aCol;vec4 p=uVP*vec4(aPos,1.0);gl_Position=p;gl_PointSize=clamp(aSize/max(p.w,0.1),2.0,150.0);}`;
+const carFS=`precision mediump float;varying vec3 vCol;
+void main(){float r=length(gl_PointCoord-0.5);float a=smoothstep(0.5,0.0,r);gl_FragColor=vec4(vCol*a,a);}`;
+const carProg=prog(carVS,carFS);
+const kA={pos:gl.getAttribLocation(carProg,'aPos'),col:gl.getAttribLocation(carProg,'aCol'),size:gl.getAttribLocation(carProg,'aSize')};
+const kU={vp:gl.getUniformLocation(carProg,'uVP')};
+const carBuf=gl.createBuffer();
+// 차량 생성: 우측 차선=멀어짐(빨강 미등), 좌측 차선=다가옴(흰 헤드라이트)
+const cars=[];
+for(let i=0;i<11;i++)cars.push({x: (rng()<0.5?2.4:4.6), z:rng()*260, dir:1,  spd:rand(9,16)});   // 멀어지는 차
+for(let i=0;i<11;i++)cars.push({x:-(rng()<0.5?2.4:4.6), z:rng()*260, dir:-1, spd:rand(10,18)});  // 다가오는 차
+const carArr=new Float32Array(cars.length*2*7); // 차당 2개 라이트 × (pos3,col3,size1)
+
+/* ---------- 행렬 ---------- */
+function perspective(fovy,aspect,n,fr){const f=1/Math.tan(fovy/2),nf=1/(n-fr);
+  return [f/aspect,0,0,0, 0,f,0,0, 0,0,(fr+n)*nf,-1, 0,0,2*fr*n*nf,0];}
+function lookAt(e,c,u){
+  let z=[e[0]-c[0],e[1]-c[1],e[2]-c[2]];let zl=Math.hypot(z[0],z[1],z[2]);z=[z[0]/zl,z[1]/zl,z[2]/zl];
+  let x=[u[1]*z[2]-u[2]*z[1],u[2]*z[0]-u[0]*z[2],u[0]*z[1]-u[1]*z[0]];let xl=Math.hypot(x[0],x[1],x[2])||1;x=[x[0]/xl,x[1]/xl,x[2]/xl];
+  let y=[z[1]*x[2]-z[2]*x[1],z[2]*x[0]-z[0]*x[2],z[0]*x[1]-z[1]*x[0]];
+  return [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
+    -(x[0]*e[0]+x[1]*e[1]+x[2]*e[2]),-(y[0]*e[0]+y[1]*e[1]+y[2]*e[2]),-(z[0]*e[0]+z[1]*e[1]+z[2]*e[2]),1];}
+function mul(a,b){const o=new Array(16);
+  for(let c=0;c<4;c++)for(let r=0;r<4;r++){let s=0;for(let k=0;k<4;k++)s+=a[k*4+r]*b[c*4+k];o[c*4+r]=s;}return o;}
+
+let VW=1,VH=1;
+function resize(){const r=stage.getBoundingClientRect();const dpr=Math.min(devicePixelRatio||1,2);
+  VW=Math.round(r.width*dpr);VH=Math.round(r.height*dpr);canvas.width=VW;canvas.height=VH;gl.viewport(0,0,VW,VH);}
+addEventListener('resize',resize);resize();
+
+/* ---------- 카메라(주행 + 시선) ---------- */
+let yaw=0,pitch=-0.06,fov=68,camZ=0,dragging=false,mx=0,my=0;
+stage.addEventListener('pointerdown',e=>{dragging=true;mx=e.clientX;my=e.clientY;stage.classList.add('drag');stage.setPointerCapture(e.pointerId);});
+stage.addEventListener('pointermove',e=>{if(!dragging)return;yaw-=(e.clientX-mx)*0.0035;pitch=clamp(pitch-(e.clientY-my)*0.0035,-1.2,1.2);mx=e.clientX;my=e.clientY;});
+stage.addEventListener('pointerup',()=>{dragging=false;stage.classList.remove('drag');});
+stage.addEventListener('wheel',e=>{e.preventDefault();fov=clamp(fov+e.deltaY*0.03,34,88);},{passive:false});
+
+const sun=[0.35,0.16,1.0];
+const fog=[0.52,0.47,0.52];
+const DIRS=['N','NE','E','SE','S','SW','W','NW'];
+loading.classList.add('hide');
+gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);
+
+let last=performance.now(),fA=0,fN=0,fr=0,T=0;
+function frame(now){
+  const dt=Math.min((now-last)/1000,0.05);last=now;T+=dt;
+  camZ=(camZ+dt*11.0)%L;                       // 자동 전진(순환)
+  const bobY=Math.sin(T*9.0)*0.03, bobX=Math.sin(T*2.3)*0.06; // 주행 흔들림
+  const eye=[bobX,1.66+bobY,camZ];
+  const cp=Math.cos(pitch),sp=Math.sin(pitch),cy=Math.cos(yaw),sy=Math.sin(yaw);
+  const fwd=[sy*cp,sp,cy*cp];
+  const wUp=[0,1,0];
+  let rgt=[fwd[1]*wUp[2]-fwd[2]*wUp[1],fwd[2]*wUp[0]-fwd[0]*wUp[2],fwd[0]*wUp[1]-fwd[1]*wUp[0]];
+  let rl=Math.hypot(rgt[0],rgt[1],rgt[2])||1;rgt=[rgt[0]/rl,rgt[1]/rl,rgt[2]/rl];
+  let up=[rgt[1]*fwd[2]-rgt[2]*fwd[1],rgt[2]*fwd[0]-rgt[0]*fwd[2],rgt[0]*fwd[1]-rgt[1]*fwd[0]];
+
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  // 하늘
+  gl.useProgram(sky);gl.depthMask(false);
+  gl.bindBuffer(gl.ARRAY_BUFFER,skyBuf);gl.enableVertexAttribArray(sA);gl.vertexAttribPointer(sA,2,gl.FLOAT,false,0,0);
+  gl.uniform3f(sU.fwd,fwd[0],fwd[1],fwd[2]);gl.uniform3f(sU.rgt,rgt[0],rgt[1],rgt[2]);gl.uniform3f(sU.up,up[0],up[1],up[2]);
+  gl.uniform1f(sU.tanH,Math.tan(fov*Math.PI/180*0.5));gl.uniform1f(sU.aspect,VW/VH);gl.uniform3f(sU.sun,sun[0],sun[1],sun[2]);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.depthMask(true);
+
+  // 도시
+  const proj=perspective(fov*Math.PI/180,VW/VH,0.1,400);
+  const view=lookAt(eye,[eye[0]+fwd[0],eye[1]+fwd[1],eye[2]+fwd[2]],up);
+  const vp=mul(proj,view);
+  gl.useProgram(city);
+  gl.bindBuffer(gl.ARRAY_BUFFER,vbuf);
+  const ST=10*4;
+  gl.enableVertexAttribArray(cA.pos);gl.vertexAttribPointer(cA.pos,3,gl.FLOAT,false,ST,0);
+  gl.enableVertexAttribArray(cA.nor);gl.vertexAttribPointer(cA.nor,3,gl.FLOAT,false,ST,12);
+  gl.enableVertexAttribArray(cA.uv);gl.vertexAttribPointer(cA.uv,2,gl.FLOAT,false,ST,24);
+  gl.enableVertexAttribArray(cA.seed);gl.vertexAttribPointer(cA.seed,1,gl.FLOAT,false,ST,32);
+  gl.enableVertexAttribArray(cA.kind);gl.vertexAttribPointer(cA.kind,1,gl.FLOAT,false,ST,36);
+  gl.uniformMatrix4fv(cU.vp,false,new Float32Array(vp));
+  gl.uniform3f(cU.cam,eye[0],eye[1],eye[2]);
+  gl.uniform3f(cU.fog,fog[0],fog[1],fog[2]);
+  gl.uniform3f(cU.light,sun[0],sun[1],sun[2]);
+  gl.uniform1f(cU.time,T);
+  gl.drawArrays(gl.TRIANGLES,0,VCOUNT);
+
+  // ---- 차량 불빛 갱신 & 렌더(가산 블렌딩) ----
+  let o=0;
+  for(const c of cars){
+    c.z+=c.dir*c.spd*dt;
+    // 카메라 주변으로 순환
+    while(c.z-camZ>140)c.z-=180; while(c.z-camZ<-30)c.z+=180;
+    const rc=c.dir>0?[1.0,0.12,0.06]:[0.9,0.95,1.0]; // 미등(빨강)/헤드라이트(흰)
+    const sz=c.dir>0?1100:1500;
+    for(const dx of [-0.85,0.85]){
+      carArr[o++]=c.x+dx;carArr[o++]=0.55;carArr[o++]=c.z;
+      carArr[o++]=rc[0];carArr[o++]=rc[1];carArr[o++]=rc[2];carArr[o++]=sz;
+    }
+  }
+  gl.useProgram(carProg);
+  gl.uniformMatrix4fv(kU.vp,false,new Float32Array(vp));
+  gl.bindBuffer(gl.ARRAY_BUFFER,carBuf);gl.bufferData(gl.ARRAY_BUFFER,carArr,gl.DYNAMIC_DRAW);
+  const KS=7*4;
+  gl.enableVertexAttribArray(kA.pos);gl.vertexAttribPointer(kA.pos,3,gl.FLOAT,false,KS,0);
+  gl.enableVertexAttribArray(kA.col);gl.vertexAttribPointer(kA.col,3,gl.FLOAT,false,KS,12);
+  gl.enableVertexAttribArray(kA.size);gl.vertexAttribPointer(kA.size,1,gl.FLOAT,false,KS,24);
+  gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.depthMask(false);
+  gl.drawArrays(gl.POINTS,0,cars.length*2);
+  gl.depthMask(true);gl.disable(gl.BLEND);
+
+  let hd=((yaw*180/Math.PI)%360+360)%360;
+  dirEl.textContent=DIRS[Math.round(hd/45)%8];degEl.textContent=Math.round(hd)+'°';
+  fr++;fA+=1/Math.max(dt,1e-4);fN++;if(fr%15===0){fpsEl.textContent=Math.round(fA/fN);fA=0;fN=0;}
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
