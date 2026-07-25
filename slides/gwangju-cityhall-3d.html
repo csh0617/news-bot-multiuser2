@@ -50,11 +50,11 @@
 <div class="wrap"><div class="stage" id="stage">
   <canvas id="gl"></canvas>
   <div class="cine"></div>
-  <div class="bar"><span class="badge">실사 3D · 시네마틱 렌더</span></div>
+  <div class="bar"><span class="badge">실사 3D · 야경 네온</span></div>
   <div class="title">
     <div class="en">GWANGJU METROPOLITAN CITY HALL</div>
     <div class="ko">광주광역시청</div>
-    <div class="sub">드론 항공뷰 · 실사 기반 3D 패럴랙스</div>
+    <div class="sub">야경 네온 무드 · 실사 기반 3D 패럴랙스</div>
   </div>
   <div class="hint">🖱️ <b>마우스 이동</b> 시점 시차<br>✨ 시네마틱 카메라 자동 무빙</div>
   <div class="loading" id="loading"><div class="ring"></div><div class="msg">이미지 로딩 중…</div></div>
@@ -73,8 +73,9 @@ function prog(v,f){const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHA
 const VS=`attribute vec2 p;varying vec2 vUv;void main(){vUv=p*0.5+0.5;gl_Position=vec4(p,0.0,1.0);}`;
 const sceneFS=`precision highp float;varying vec2 vUv;
 uniform sampler2D tex;uniform float iaOsa;uniform float saOia;uniform float wide;
-uniform float zoom;uniform vec2 pan;uniform vec2 par;
+uniform float zoom;uniform vec2 pan;uniform vec2 par;uniform float uTime;
 float luma(vec3 c){return dot(c,vec3(0.299,0.587,0.114));}
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 vec2 coverUV(vec2 s){vec2 u=s;if(wide>0.5){u.y=0.5+(s.y-0.5)*iaOsa;}else{u.x=0.5+(s.x-0.5)*saOia;}return u;}
 float depthAt(vec2 u){return smoothstep(0.10,1.0,u.y);}     // 위(하늘/원경)=먼, 아래(잔디/전경)=가까움
 void main(){
@@ -82,15 +83,39 @@ void main(){
   base=0.5+(base-0.5)/zoom+pan;
   float d=depthAt(base);
   vec2 uv=base+par*(d-0.32);
-  vec3 c=texture2D(tex,uv).rgb;
-  c=pow(c,vec3(2.2));                 // sRGB → 선형
-  c*=1.06;                            // 노출
-  c=(c-0.18)*1.14+0.18;              // 대비(중간톤 기준)
-  float l=luma(c);
-  c=mix(vec3(l),c,1.16);            // 채도
-  c*=vec3(1.02,1.0,0.965);          // 웜 밸런스
-  c=max(c,0.0);
-  gl_FragColor=vec4(c,1.0);          // 선형 저장
+  vec3 src=texture2D(tex,uv).rgb;
+  src=pow(src,vec3(2.2));                     // sRGB → 선형
+  float lum=luma(src);
+  // 하늘 마스크(위쪽 + 밝고 + 푸른톤)
+  float up=smoothstep(0.30,0.62,base.y);
+  float br=smoothstep(0.30,0.60,lum);
+  float bl=smoothstep(0.0,0.16,src.b-src.r);
+  float sky=clamp(up*br*(0.55+0.45*bl),0.0,1.0);
+  // 야간 하늘 + 달 + 별
+  vec3 nsky=mix(vec3(0.015,0.02,0.06),vec3(0.05,0.03,0.10),base.y);
+  float moon=exp(-pow(distance(base,vec2(0.80,0.92))*6.5,2.0));
+  nsky+=vec3(0.55,0.55,0.62)*moon*0.6;
+  float star=step(0.987,hash(floor(base*vec2(430.0,250.0))));
+  nsky+=vec3(0.8,0.85,1.0)*star*(0.4+0.6*abs(sin(uTime*3.0+hash(floor(base*260.0))*30.0)));
+  // 지상: 밤처럼 어둡게 + 쿨 시프트
+  vec3 gnd=src*0.15;
+  gnd*=vec3(0.65,0.85,1.25);
+  gnd=pow(max(gnd,0.0),vec3(1.12));
+  // 도시/창문 불빛(원본 밝기 기반 트윙클)
+  float notsky=1.0-sky;
+  float vgate=smoothstep(0.74,0.42,base.y);            // 하늘 영역엔 불빛 억제
+  float band=smoothstep(0.28,0.54,lum)*notsky*vgate;
+  vec2 gp=base*vec2(250.0,150.0);vec2 cell=floor(gp);
+  float win=step(0.70,hash(cell))*step(0.34,fract(gp.x))*step(0.34,fract(gp.y));
+  float tw=0.5+0.5*sin(uTime*2.2+hash(cell)*40.0);
+  float warm=hash(cell+3.3);
+  vec3 litc=warm>0.62?vec3(1.0,0.70,0.32):(warm>0.32?vec3(0.4,0.82,1.0):vec3(1.0,0.4,0.8));
+  vec3 lights=litc*win*band*tw*2.0;
+  vec3 col=mix(gnd,nsky,sky)+lights;
+  // 네온 무드 워시
+  col=mix(col,col*vec3(1.12,0.82,1.18),0.22);
+  col+=vec3(0.015,0.0,0.045)*notsky;
+  gl_FragColor=vec4(max(col,0.0),1.0);          // 선형 저장
 }`;
 const brightFS=`precision mediump float;varying vec2 vUv;uniform sampler2D tex;uniform float th;
 void main(){vec3 c=texture2D(tex,vUv).rgb;float l=max(max(c.r,c.g),c.b);gl_FragColor=vec4(c*smoothstep(th,th+0.3,l),1.0);}`;
@@ -112,7 +137,7 @@ void main(){
   col.g=texture2D(scene,uv).g;
   col.b=texture2D(scene,uv-d*ca).b;
   col+=texture2D(bloom,uv).rgb*strength;   // 선형 블룸
-  col*=1.55;                               // 노출(선형→톤매핑 대비)
+  col*=1.18;                               // 노출(야경)
   col*=smoothstep(1.05,0.30,r2*1.9);       // 비네트(선형)
   col=(col*(2.51*col+0.03))/(col*(2.43*col+0.59)+0.14); // ACES
   col=pow(clamp(col,0.0,1.0),vec3(0.4545)); // 선형 → sRGB 인코딩
@@ -123,7 +148,7 @@ void main(){
 const sceneP=prog(VS,sceneFS),brightP=prog(VS,brightFS),blurP=prog(VS,blurFS),compP=prog(VS,compFS);
 const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
 function bindFS(p){const l=gl.getAttribLocation(p,'p');gl.bindBuffer(gl.ARRAY_BUFFER,buf);gl.enableVertexAttribArray(l);gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0);}
-const sU={ia:gl.getUniformLocation(sceneP,'iaOsa'),sa:gl.getUniformLocation(sceneP,'saOia'),wide:gl.getUniformLocation(sceneP,'wide'),zoom:gl.getUniformLocation(sceneP,'zoom'),pan:gl.getUniformLocation(sceneP,'pan'),par:gl.getUniformLocation(sceneP,'par'),tex:gl.getUniformLocation(sceneP,'tex')};
+const sU={ia:gl.getUniformLocation(sceneP,'iaOsa'),sa:gl.getUniformLocation(sceneP,'saOia'),wide:gl.getUniformLocation(sceneP,'wide'),zoom:gl.getUniformLocation(sceneP,'zoom'),pan:gl.getUniformLocation(sceneP,'pan'),par:gl.getUniformLocation(sceneP,'par'),tex:gl.getUniformLocation(sceneP,'tex'),time:gl.getUniformLocation(sceneP,'uTime')};
 const brU={tex:gl.getUniformLocation(brightP,'tex'),th:gl.getUniformLocation(brightP,'th')};
 const blU={tex:gl.getUniformLocation(blurP,'tex'),dir:gl.getUniformLocation(blurP,'dir')};
 const coU={scene:gl.getUniformLocation(compP,'scene'),bloom:gl.getUniformLocation(compP,'bloom'),strength:gl.getUniformLocation(compP,'strength'),uTime:gl.getUniformLocation(compP,'uTime'),res:gl.getUniformLocation(compP,'res')};
@@ -172,14 +197,14 @@ function frame(now){
   gl.bindFramebuffer(gl.FRAMEBUFFER,sceneT.fbo);gl.viewport(0,0,VW,VH);
   gl.useProgram(sceneP);
   gl.uniform1f(sU.ia,IMGA/sa);gl.uniform1f(sU.sa,sa/IMGA);gl.uniform1f(sU.wide,wide);
-  gl.uniform1f(sU.zoom,zoom);gl.uniform2f(sU.pan,pan[0],pan[1]);gl.uniform2f(sU.par,par[0],par[1]);
+  gl.uniform1f(sU.zoom,zoom);gl.uniform2f(sU.pan,pan[0],pan[1]);gl.uniform2f(sU.par,par[0],par[1]);gl.uniform1f(sU.time,t);
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,tex);gl.uniform1i(sU.tex,0);
   bindFS(sceneP);gl.drawArrays(gl.TRIANGLES,0,3);
 
   // 블룸
   const hw=VW>>1,hh=VH>>1;
   gl.bindFramebuffer(gl.FRAMEBUFFER,brightT.fbo);gl.viewport(0,0,hw,hh);
-  gl.useProgram(brightP);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,sceneT.tex);gl.uniform1i(brU.tex,0);gl.uniform1f(brU.th,0.6);bindFS(brightP);gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.useProgram(brightP);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,sceneT.tex);gl.uniform1i(brU.tex,0);gl.uniform1f(brU.th,0.42);bindFS(brightP);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.bindFramebuffer(gl.FRAMEBUFFER,blurT.fbo);gl.viewport(0,0,hw,hh);
   gl.useProgram(blurP);gl.bindTexture(gl.TEXTURE_2D,brightT.tex);gl.uniform1i(blU.tex,0);gl.uniform2f(blU.dir,1.3/hw,0);bindFS(blurP);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.bindFramebuffer(gl.FRAMEBUFFER,brightT.fbo);gl.viewport(0,0,hw,hh);
@@ -190,7 +215,7 @@ function frame(now){
   gl.useProgram(compP);
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,sceneT.tex);gl.uniform1i(coU.scene,0);
   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,brightT.tex);gl.uniform1i(coU.bloom,1);
-  gl.uniform1f(coU.strength,0.55);gl.uniform1f(coU.uTime,t);gl.uniform2f(coU.res,VW,VH);
+  gl.uniform1f(coU.strength,0.9);gl.uniform1f(coU.uTime,t);gl.uniform2f(coU.res,VW,VH);
   bindFS(compP);gl.drawArrays(gl.TRIANGLES,0,3);
   gl.activeTexture(gl.TEXTURE0);
   requestAnimationFrame(frame);
